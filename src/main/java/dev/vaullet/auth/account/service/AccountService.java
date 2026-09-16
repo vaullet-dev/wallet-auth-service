@@ -5,12 +5,14 @@ import dev.vaullet.auth.common.error.exception.AccountClosedException;
 import dev.vaullet.auth.common.error.exception.ExternalRefTakenException;
 import dev.vaullet.auth.common.error.exception.IdentityAlreadyLinkedException;
 import dev.vaullet.common.error.ResourceNotFoundException;
+import jakarta.validation.Valid;
 import java.util.Optional;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.validation.annotation.Validated;
 
 /**
  * The account rules, and the only place a transaction begins.
@@ -30,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
  * account is {@code SUPER_ADMIN}'s and freezing one is {@code FRAUD_REVIEWER}'s. Reads take a scope
  * alone — enumerating five roles on every getter would be a rule nobody maintains.
  */
+@Validated
 @Service
 public class AccountService {
 
@@ -63,20 +66,20 @@ public class AccountService {
      * database arbitrating, which is cheaper and more correct than a lock held across a read and a
      * write.
      *
-     * @param keycloakSub the Keycloak subject, or null to create an unlinked anchor
-     * @param externalRef the operator's own user id, or null
-     * @throws IllegalArgumentException if both are null. Not a user-facing error: the request DTO
-     *     rejects that combination with a 400 naming the fields, and the database refuses it in
-     *     {@code accounts_natural_key_ck}. Reaching here means an internal caller is wrong, and a
-     *     500 is the honest answer to a programming error.
+     * <p>The command carries {@link dev.vaullet.auth.account.service.validation.AtLeastOneNaturalKey},
+     * so a request with neither key is refused by Bean Validation before a line of this method runs —
+     * a 400 naming both fields, rather than an integrity violation from the database. That check used
+     * to be four lines of {@code if} here; as a constraint on the command it is stated once and holds
+     * for the step 2 listener too, which builds a {@link NewAccount} from a Keycloak event and never
+     * passes through a controller.
+     *
+     * @param command what to create, validated on the way in
      */
     @Transactional
     @PreAuthorize("hasAuthority('SCOPE_identity:admin') and hasRole('SUPER_ADMIN')")
-    public Account create(@Nullable UUID keycloakSub, @Nullable String externalRef) {
-        if (keycloakSub == null && externalRef == null) {
-            throw new IllegalArgumentException(
-                    "An account needs at least one of keycloak_sub or external_ref");
-        }
+    public Account create(@Valid NewAccount command) {
+        UUID keycloakSub = command.getKeycloakSub().orElse(null);
+        String externalRef = command.getExternalRef().orElse(null);
 
         if (externalRef != null) {
             Optional<Account> byRef = accounts.findByExternalRef(externalRef).map(AccountService::toDomain);
