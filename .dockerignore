@@ -1,0 +1,11 @@
+# What never needs to reach the Docker daemon. This shrinks the build context,
+# which is uploaded in full on every build — .git/ in particular grows forever
+# and is read by nothing in the Dockerfile.
+target/
+.git/
+.github/
+.idea/
+*.iml
+
+# The published documentation page. 40 KB of HTML that the build has no use for.
+docs/
