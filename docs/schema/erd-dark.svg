@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="382" viewBox="0 0 980 382" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif">
+<rect width="980" height="382" fill="#12121A"/>
+<rect x="20" y="20" width="940" height="196" rx="10" fill="#1A1A25" stroke="#2C2B3B"/>
+<path d="M20 30 a10 10 0 0 1 10 -10 h920 a10 10 0 0 1 10 10 v30 h-940 z" fill="#242333"/>
+<text x="36" y="46" font-size="15" font-weight="700" fill="#EEEDF6">accounts</text>
+<text x="944" y="46" font-size="11.5" text-anchor="end" fill="#8D8BA2">identity_schema · PostgreSQL 18.6</text>
+<line x1="20" y1="60" x2="960" y2="60" stroke="#2C2B3B" stroke-width="0.7"/>
+<rect x="36" y="66" width="26" height="14" rx="3" fill="#EEEDF6"/>
+<text x="49.0" y="76.5" font-size="9" font-weight="700" text-anchor="middle" fill="#12121A">PK</text>
+<text x="72" y="77" font-size="12.5" font-weight="600" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#EEEDF6">account_id</text>
+<text x="240" y="77" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#8D8BA2">uuid</text>
+<line x1="20" y1="86" x2="960" y2="86" stroke="#2C2B3B" stroke-width="0.7"/>
+<rect x="36" y="92" width="26" height="14" rx="3" fill="#EEEDF6"/>
+<text x="49.0" y="102.5" font-size="9" font-weight="700" text-anchor="middle" fill="#12121A">UK</text>
+<text x="72" y="103" font-size="12.5" font-weight="600" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#EEEDF6">keycloak_sub</text>
+<text x="240" y="103" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#8D8BA2">uuid</text>
+<rect x="440" y="92" width="52" height="14" rx="7" fill="#33260F"/>
+<text x="466" y="102.5" font-size="9" font-weight="700" text-anchor="middle" fill="#F2C07A">nullable</text>
+<line x1="20" y1="112" x2="960" y2="112" stroke="#2C2B3B" stroke-width="0.7"/>
+<rect x="36" y="118" width="26" height="14" rx="3" fill="#EEEDF6"/>
+<text x="49.0" y="128.5" font-size="9" font-weight="700" text-anchor="middle" fill="#12121A">UK</text>
+<text x="72" y="129" font-size="12.5" font-weight="600" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#EEEDF6">external_ref</text>
+<text x="240" y="129" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#8D8BA2">text</text>
+<rect x="440" y="118" width="52" height="14" rx="7" fill="#33260F"/>
+<text x="466" y="128.5" font-size="9" font-weight="700" text-anchor="middle" fill="#F2C07A">nullable</text>
+<line x1="20" y1="138" x2="960" y2="138" stroke="#2C2B3B" stroke-width="0.7"/>
+<text x="72" y="155" font-size="12.5" font-weight="600" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#EEEDF6">status</text>
+<text x="240" y="155" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#8D8BA2">text</text>
+<line x1="20" y1="164" x2="960" y2="164" stroke="#2C2B3B" stroke-width="0.7"/>
+<text x="72" y="181" font-size="12.5" font-weight="600" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#EEEDF6">created_at</text>
+<text x="240" y="181" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#8D8BA2">timestamp with time zone</text>
+<text x="508" y="181" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#8D8BA2">default now()</text>
+<line x1="20" y1="190" x2="960" y2="190" stroke="#2C2B3B" stroke-width="0.7"/>
+<text x="72" y="207" font-size="12.5" font-weight="600" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#EEEDF6">updated_at</text>
+<text x="240" y="207" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#8D8BA2">timestamp with time zone</text>
+<text x="508" y="207" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#8D8BA2">default now()</text>
+<text x="24" y="238" font-size="11" font-weight="700" letter-spacing="0.08em" fill="#8D8BA2">CHECK CONSTRAINTS</text>
+<text x="24" y="258" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#EEEDF6">accounts_external_ref_not_blank_ck</text>
+<text x="330" y="258" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#8D8BA2">CHECK (((external_ref IS NULL) OR (length(btrim(external_ref)) &gt; 0)))</text>
+<text x="24" y="278" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#EEEDF6">accounts_natural_key_ck</text>
+<text x="330" y="278" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#8D8BA2">CHECK (((external_ref IS NOT NULL) OR (keycloak_sub IS NOT NULL)))</text>
+<text x="24" y="298" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#EEEDF6">accounts_status_ck</text>
+<text x="330" y="298" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#8D8BA2">CHECK ((status = ANY (ARRAY[&#x27;ACTIVE&#x27;::text, &#x27;SUSPENDED&#x27;::text, &#x27;CLOSED&#x27;::text])))</text>
+<text x="24" y="332" font-size="11" font-weight="700" letter-spacing="0.08em" fill="#8D8BA2">TRIGGERS</text>
+<text x="24" y="352" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#EEEDF6">accounts_invariants</text>
+<text x="330" y="352" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#8D8BA2">BEFORE UPDATE · FOR EACH ROW · accounts_enforce_invariants()</text>
+</svg>
