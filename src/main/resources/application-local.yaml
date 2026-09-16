@@ -1,0 +1,67 @@
+# ---------------------------------------------------------------------------
+# Developer machine. Activated automatically by `./mvnw spring-boot:run`
+# (see the spring-boot-maven-plugin block in pom.xml).
+#
+# Everything here trades safety for feedback speed. None of it applies to a
+# deployed environment, because a deployed environment never has this profile —
+# `java -jar` with no profile gets the secure-by-default configuration, and the
+# cluster sets `prod`.
+#
+# This file IS committed, deliberately. It is the profile `spring-boot:run`
+# activates, so a clean clone that lacked it would start with a different security
+# posture than the README describes. It holds no secrets: the local database
+# credentials live in compose.yaml, which is committed for the same reason.
+# ---------------------------------------------------------------------------
+spring:
+  # spring-boot-docker-compose starts compose.yaml, waits for the healthcheck, and
+  # points the datasource at the published port — so `spring-boot:run` on a clean
+  # checkout needs no manual `docker compose up`, and `start-and-stop` means the
+  # container goes away with the application instead of lingering until the next
+  # time someone notices it.
+  docker:
+    compose:
+      enabled: true
+      lifecycle-management: start-and-stop
+
+logging:
+  level:
+    # dev.vaullet.auth — matching the actual package. Worth stating because the
+    # ledger's equivalent file says `io.vaullet.ledger`, left behind by the io -> dev
+    # package move, and a logger level set on a package that does not exist fails
+    # silently: you get no debug output and no error telling you why.
+    dev.vaullet.auth: DEBUG
+    # The statements carry the concurrency argument — the conditional UPDATE, the
+    # IS NULL guard — so seeing them is the point rather than a debugging last
+    # resort. Never enable in production: it logs parameter values, and here the
+    # parameters are account ids and the operator's own user references.
+    org.springframework.jdbc.core.JdbcTemplate: DEBUG
+    org.springframework.jdbc.core.StatementCreatorUtils: TRACE
+    # Shows which handler method matched and how the body was bound — the fastest
+    # way to see why a request 400s before it reaches any of our code.
+    org.springframework.web.servlet.mvc.method.annotation: DEBUG
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # Everything, because on a laptop there is nothing to protect and
+        # /actuator/configprops is the quickest answer to "what did that property
+        # actually resolve to". The deployed exposure list comes from the platform
+        # defaults and is deliberately short.
+        include: "*"
+  tracing:
+    sampling:
+      # Every request traced. At laptop volumes the cost is nothing and a partially
+      # sampled trace is worse than none — you go looking for a span that was never
+      # recorded.
+      probability: 1.0
+
+app:
+  environment: local
+
+vaullet:
+  api:
+    # The two ports a local Admin UI would run on: Create React App and Vite. Only
+    # needed because a browser is the caller here; in a cluster the caller is the
+    # gateway and CORS stays off.
+    allowed-origins: http://localhost:3000,http://localhost:5173

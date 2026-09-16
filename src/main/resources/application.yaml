@@ -1,0 +1,188 @@
+# ---------------------------------------------------------------------------
+# Base configuration — shared by every environment.
+#
+# Conventions this file follows:
+#   * YAML, not .properties: nesting makes the shape of the configuration visible.
+#   * Every environment-specific or secret value is an ${ENV_VAR} reference. A
+#     default is provided only where the default is safe everywhere.
+#   * Profile-specific overrides live in application-<profile>.yaml, never in
+#     if/else inside the application.
+#   * Anything the whole platform agrees on is imported, not restated. What is
+#     left here is what THIS service actually decides.
+#
+# Credentials never appear in this repository. In a cluster they come from OpenBao
+# via External Secrets, which writes an ordinary Kubernetes Secret that is mounted
+# as environment variables — the service has no OpenBao client and makes no call to
+# it. The defaults below are the disposable Compose container in compose.yaml and
+# exist only so a clean clone runs.
+# ---------------------------------------------------------------------------
+spring:
+  application:
+    name: auth-service
+
+  config:
+    # backend-common-web ships the platform defaults: virtual threads, snake_case
+    # JSON (ADR-011 §8), problem+json for framework errors, graceful shutdown, the
+    # Actuator exposure list, tracing sampling and the log correlation pattern. Read
+    # them at backend-common-web/src/main/resources/vaullet/platform-defaults.yaml.
+    #
+    # An imported document ranks BELOW the file importing it, so anything set here
+    # still wins. Importing explicitly rather than letting an auto-configuration set
+    # property defaults is deliberate: a reader of this file can follow one line to
+    # everything that is configured, instead of concluding from silence that nothing is.
+    import: "classpath:vaullet/platform-defaults.yaml"
+
+  datasource:
+    # currentSchema, rather than a search_path set later: keycloak_schema lives in
+    # this same database and is emphatically not ours (ADR-003), so unqualified SQL
+    # resolving there by accident is a failure mode worth designing out rather than
+    # reviewing for.
+    #
+    # ONE credential. WHICH identity this is depends on the workload, not on this
+    # file: the Deployment mounts the app role, the migration Job mounts the migrator
+    # role, and the property names are identical in both. See the `migrate` profile.
+    url: ${DB_URL:jdbc:postgresql://localhost:55433/auth?currentSchema=identity_schema}
+    username: ${DB_USERNAME:auth}
+    password: ${DB_PASSWORD:auth}
+    hikari:
+      # A bound on how long any single statement may run. The ledger sets 1s because
+      # its reserve path takes a row lock and head-of-line blocking is the failure it
+      # designs against; nothing here locks anything for long, so this is hygiene
+      # rather than a correctness control and it is set higher.
+      #
+      # Safe to apply to every connection because migrations do not run in this
+      # process in a deployed environment — see spring.flyway.enabled below. Locally
+      # and in tests Flyway does share this pool, which is fine while the migrations
+      # are small; the `migrate` profile lifts the limit where they are not.
+      connection-init-sql: SET statement_timeout = '3s'
+      # Small pools beat large ones: the database, not the app, is the bottleneck, and
+      # a pool bigger than the database's worker count just moves the queue.
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+      minimum-idle: 2
+      # Hikari's own settings are plain milliseconds — they bind straight onto
+      # HikariConfig and do not go through Spring's Duration converter, so `3s` here
+      # fails at startup. Spring-owned properties elsewhere in this file do take
+      # durations; the inconsistency is Hikari's, and it is worth a comment.
+      connection-timeout: 3000
+      # Logs a stack trace for a connection held longer than this — finds the
+      # long-running transaction before it exhausts the pool in production.
+      leak-detection-threshold: 30000
+
+  flyway:
+    # ON here, because "here" is a laptop or a test container, where the connecting
+    # role owns the database and migrating at startup is the fastest way to a working
+    # schema.
+    #
+    # OFF in prod (application-prod.yaml). Migrations run as a separate Kubernetes Job
+    # from the `migrate` profile, holding the migrator role; the Deployment holds an
+    # app role with no DDL rights and never sees the other credential. That is what
+    # makes "the application cannot drop a table" a property of what is mounted rather
+    # than a promise in a document.
+    enabled: true
+    locations: classpath:db/migration
+    # Flyway creates the schema if it is absent and puts its history table there, so
+    # the service owns its namespace without a bootstrap script. The database and the
+    # roles belong to gitops; the schema and everything in it belong to the service.
+    schemas: identity_schema
+    # Refuse to run against a database whose history does not match. A checksum
+    # mismatch means someone edited an applied migration — on the table every balance
+    # is keyed to, that is a schema nobody can vouch for.
+    validate-on-migrate: true
+
+  mvc:
+    # Deliberately no `apiversion` block, and none in the platform defaults either.
+    # The @vaullet-dev template resolves the API version from an X-API-Version header;
+    # ADR-011 chose the major version in the URI path (/v1/accounts) and rejected
+    # header versioning, because a path is greppable in logs and dashboards while a
+    # missing header is an implicit version nobody notices.
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # No default on purpose. An unset issuer means no JwtDecoder, which means
+          # the context refuses to start rather than starting without token validation.
+          #
+          # Worth stating plainly on this service of all of them: Auth Service
+          # VALIDATES tokens exactly like every other service. Keycloak is the only
+          # signer in the platform (ADR-006); this service brokers and never mints.
+          issuer-uri: ${OAUTH2_ISSUER_URI:}
+
+server:
+  error:
+    # Inherited from the platform defaults, restated because the reason is specific
+    # here: a leaked message would name columns of the identity table.
+    include-message: never
+    include-stacktrace: never
+
+management:
+  # /actuator/info answers "which build is actually running", asked at 03:00 by someone
+  # who cannot trust the image tag. The build and git contributors switch on once
+  # build-info.properties and git.properties exist in the jar, which the POM arranges.
+  #
+  # `full` rather than the default `simple`: an abbreviated SHA is fine for a human
+  # reading a dashboard and ambiguous for anything that has to check the code out again.
+  info:
+    git:
+      mode: full
+
+  observations:
+    key-values:
+      application: auth-service
+
+logging:
+  level:
+    root: INFO
+    dev.vaullet.auth: ${LOG_LEVEL:INFO}
+
+# ---------------------------------------------------------------------------
+# Platform library settings (backend-common), bound and validated by ApiProperties,
+# OpenApiProperties and SecurityProperties.
+#
+# The prefix is `vaullet` rather than `app` so a reader can tell at a glance which keys
+# come from the shared library and which are this codebase's own.
+# ---------------------------------------------------------------------------
+app:
+  # Free-form environment label, interpolated into the OpenAPI description below.
+  environment: ${APP_ENVIRONMENT:unknown}
+
+vaullet:
+  api:
+    # Empty by default: this service's callers are the gateway and other services
+    # (ADR-008), not browsers, so CORS stays off unless a deployment opens it.
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:}
+    # ADR-011 §2 puts the major version in the path; the library default already
+    # matches, and it is restated because CORS scope is worth being explicit about.
+    cors-path-pattern: /v1/**
+    # DELETE is absent because account closure is step 4, not step 1. Widening CORS
+    # for a method no endpoint answers is a permission granted for nothing.
+    allowed-methods: GET,POST,PATCH
+
+  security:
+    # What the @PreAuthorize rules in this service ask for. Under the `local` profile
+    # these are handed to the anonymous principal, so a developer exercises the real
+    # authorisation rules rather than a build with authorisation compiled out.
+    #
+    # BOTH roles are listed, a deliberate convenience with a deliberate cost: creating
+    # an account is SUPER_ADMIN's and freezing one is FRAUD_REVIEWER's, so a local run
+    # granting only one would make half the rules untestable by hand — but granting
+    # both means the SEPARATION between them is not observable here. AccountApiIT has
+    # to assert it with distinct principals; the local profile cannot.
+    local:
+      anonymous-authorities: SCOPE_identity:read,SCOPE_identity:admin,ROLE_SUPER_ADMIN,ROLE_FRAUD_REVIEWER,ROLE_OPERATOR
+
+  openapi:
+    title: Vaullet Auth API
+    # The major version in the path (ADR-011). Compatible additions do not change it;
+    # a breaking change means /v2 and a 12-month deprecation window.
+    version: "1"
+    description: |
+      The account anchor — see ADR-006 and ADR-014.
+
+      An account is Vaullet's own record of a user: an identifier the ledger keys on, a
+      status, and a reference back to the identity Keycloak owns. It holds no personal
+      data in either identity mode.
+
+      Timestamps are RFC 3339 UTC. Errors are RFC 9457 problem+json carrying a stable `code`.
+
+      Environment: ${app.environment}
