@@ -8,7 +8,6 @@ import dev.vaullet.common.error.ResourceNotFoundException;
 import jakarta.validation.Valid;
 import java.util.Optional;
 import java.util.UUID;
-import org.jspecify.annotations.Nullable;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -78,37 +77,78 @@ public class AccountService {
     @Transactional
     @PreAuthorize("hasAuthority('SCOPE_identity:admin') and hasRole('SUPER_ADMIN')")
     public Account create(@Valid NewAccount command) {
-        UUID keycloakSub = command.getKeycloakSub().orElse(null);
-        String externalRef = command.getExternalRef().orElse(null);
+        return findByNaturalKey(command)
+                .map(existing -> replay(existing, command))
+                .orElseGet(() -> insert(command));
+    }
 
-        if (externalRef != null) {
-            Optional<Account> byRef = accounts.findByExternalRef(externalRef).map(AccountService::toDomain);
-            if (byRef.isPresent()) {
-                Account existing = byRef.get();
-                // The stored account has a different identity behind the operator's id — or none yet,
-                // while this request brings one. Neither is a repeat of the same request. Linking an
-                // unlinked anchor is a real operation, but it is step 2's, not a side effect of create.
-                if (keycloakSub != null && !Optional.of(keycloakSub).equals(existing.getKeycloakSub())) {
-                    throw new ExternalRefTakenException(externalRef);
-                }
-                return replayed(existing);
-            }
+    /**
+     * The account this request would already have created, if it ran before.
+     *
+     * <p>At most one row can match: both keys are unique, and a command that matched two different
+     * accounts on its two keys would need each of them to hold one key and not the other — which the
+     * reconciliation below then refuses. Checking the operator's reference first is arbitrary and
+     * safe for that reason.
+     */
+    private Optional<Account> findByNaturalKey(NewAccount command) {
+        Optional<Account> byRef = command.getExternalRef()
+                .flatMap(accounts::findByExternalRef)
+                .map(AccountService::toDomain);
+        if (byRef.isPresent()) {
+            return byRef;
         }
-        if (keycloakSub != null) {
-            Optional<Account> bySub = accounts.findByKeycloakSub(keycloakSub).map(AccountService::toDomain);
-            if (bySub.isPresent()) {
-                Account existing = bySub.get();
-                // ADR-006's subject collision: one identity claiming two operator identifiers. Two
-                // accounts for one person splits their balance, so the second claim is refused.
-                if (externalRef != null && !Optional.of(externalRef).equals(existing.getExternalRef())) {
-                    throw new IdentityAlreadyLinkedException(keycloakSub);
-                }
-                return replayed(existing);
-            }
-        }
+        return command.getKeycloakSub()
+                .flatMap(accounts::findByKeycloakSub)
+                .map(AccountService::toDomain);
+    }
 
+    private Account insert(NewAccount command) {
         return toDomain(accounts.insert(
-                UUID.randomUUID(), keycloakSub, externalRef, AccountStatus.ACTIVE.name()));
+                UUID.randomUUID(),
+                command.getKeycloakSub().orElse(null),
+                command.getExternalRef().orElse(null),
+                AccountStatus.ACTIVE.name()));
+    }
+
+    /**
+     * Decide whether a matched account is this request repeating itself, or a different request
+     * colliding with it.
+     *
+     * <p>It is a repeat unless the command <em>asserts</em> something the stored account does not
+     * say. Each contradiction gets the code that names which side collided, so an integrator can
+     * tell "your identifier is mapped elsewhere" from "that identity already has an account" —
+     * different problems with different fixes, only one of which is anybody's mistake.
+     */
+    private static Account replay(Account existing, NewAccount command) {
+        if (contradicts(command.getExternalRef(), existing.getExternalRef())) {
+            throw new ExternalRefTakenException(command.getExternalRef().orElseThrow());
+        }
+        if (contradicts(command.getKeycloakSub(), existing.getKeycloakSub())) {
+            throw new IdentityAlreadyLinkedException(command.getKeycloakSub().orElseThrow());
+        }
+        // Handing a closed account back with a 201 would tell the caller it is ready to use. Closure
+        // is terminal, so this is permanent rather than a state they can wait out.
+        if (existing.getStatus() == AccountStatus.CLOSED) {
+            throw new AccountClosedException(existing.getAccountId());
+        }
+        return existing;
+    }
+
+    /**
+     * The command asserts a value the stored account does not have.
+     *
+     * <p><b>Absent is not a contradiction.</b> Omitting a field is not the same as changing it, so a
+     * caller who sends less on a retry than they sent originally still gets their account back.
+     *
+     * <p>A stored {@code empty} against a requested value <em>is</em> counted as a contradiction,
+     * and that is the one debatable line in this method. It means "attach an identity to an existing
+     * unlinked anchor", which is a real operation — just not this one. It belongs to step 2's
+     * just-in-time provisioning, which will link the row properly instead of refusing. Until then
+     * the API cannot reach this case anyway: {@code CreateAccountRequest} carries no
+     * {@code keycloak_sub}, because no HTTP caller is in a position to know one.
+     */
+    private static <T> boolean contradicts(Optional<T> requested, Optional<T> stored) {
+        return requested.isPresent() && !requested.equals(stored);
     }
 
     @Transactional(readOnly = true)
@@ -156,19 +196,6 @@ public class AccountService {
             return existing;
         }
         throw new AccountClosedException(accountId);
-    }
-
-    /**
-     * A retry resolved to an account that has since been closed.
-     *
-     * <p>Handing it back with a 201 would tell the caller their account is ready to use, which it is
-     * not. Closure is terminal, so this is permanent rather than a state they can wait out.
-     */
-    private static Account replayed(Account existing) {
-        if (existing.getStatus() == AccountStatus.CLOSED) {
-            throw new AccountClosedException(existing.getAccountId());
-        }
-        return existing;
     }
 
     private static Account toDomain(AccountRepository.AccountRow row) {
