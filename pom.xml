@@ -1,0 +1,410 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>4.1.1</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>dev.vaullet</groupId>
+  <artifactId>auth-service</artifactId>
+  <!--
+    CI-friendly version. ${revision} is one of the three properties Maven resolves inside a
+    <version> element, so the number lives in exactly one place — the commit log, read by
+    scripts/version.sh — and a release is `-Drevision=1.2.3` rather than a commit that edits
+    this file. flatten-maven-plugin below substitutes the literal into the installed POM.
+  -->
+  <version>${revision}</version>
+  <name>Vaullet Auth Service</name>
+  <description>The account anchor and identity adapter — see vaullet/docs/adr/006 and 014</description>
+
+  <properties>
+    <!--
+      Fallback only, and deliberately not a number anybody could mistake for a release. Every
+      real build passes -Drevision from scripts/version.sh.
+
+      It is NOT -SNAPSHOT. A snapshot is a mutable coordinate — two builds of the same version
+      can contain different code — and this service has none: main releases X.Y.Z, a branch
+      builds the immutable pre-release X.Y.Z-<branch>-<n>. That is what lets an image tag, a
+      GitOps manifest and /actuator/info agree on which build is running.
+    -->
+    <revision>0.0.0-DEV</revision>
+
+    <java.version>21</java.version>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+    <!--
+      The OCI image this service publishes. Properties so a local build can override the
+      registry (-Dimage.registry=localhost:5000) without editing the POM.
+    -->
+    <image.registry>ghcr.io</image.registry>
+    <image.owner>vaullet-dev</image.owner>
+    <image.name>${image.registry}/${image.owner}/${project.artifactId}</image.name>
+    <!--
+      The cluster is a Hetzner AX41 — x86_64. This laptop is arm64. Without this the buildpack
+      quietly produces an arm64 image that pulls fine and then dies inside the pod with an
+      exec-format error. Building for the target rather than for the builder is the whole point.
+      Override with -Dimage.platform=linux/arm64 for a fast native build that only runs locally.
+    -->
+    <image.platform>linux/amd64</image.platform>
+
+    <!-- Versions not managed by the Spring Boot BOM -->
+    <!--
+      A released version of backend-common, never a snapshot: this service must be able to
+      rebuild the exact bytes it deployed, and a snapshot coordinate cannot promise that.
+
+      0.1.1 rather than the ledger's 0.1.0 — it is the newest published release and a service
+      with no history has nothing to regress. The two are expected to drift: the library moves
+      on its own schedule (ADR-013), and pinning every consumer together would mean a library
+      patch forces a release of every service. Bumping it here is a deliberate `deps:` commit,
+      which is a PATCH — the library moving is not, by itself, a change to this service's API.
+    -->
+    <common.version>0.1.1</common.version>
+    <springdoc.version>3.1.0</springdoc.version>
+    <flatten-maven-plugin.version>1.7.3</flatten-maven-plugin.version>
+  </properties>
+
+  <!--
+    Where dev.vaullet:common-* comes from. Without this the build works on a laptop that has run
+    `mvn install` in backend-common and nowhere else — which is not a build, it is a local
+    coincidence.
+
+    GitHub Packages requires authentication even to read a public artefact, so this needs a
+    `github` server in settings.xml: CI gets one from actions/setup-java, locally it is a PAT
+    with read:packages in ~/.m2/settings.xml.
+  -->
+  <repositories>
+    <repository>
+      <id>github</id>
+      <name>GitHub Packages — vaullet-dev/backend-common</name>
+      <!--
+        The owner must match the organisation as spelled today. GitHub redirects a renamed org
+        for git and for the web but NOT for Packages, so a stale owner here fails to resolve
+        with an error that reads like a missing artefact rather than a wrong address.
+      -->
+      <url>https://maven.pkg.github.com/vaullet-dev/backend-common</url>
+      <releases>
+        <enabled>true</enabled>
+      </releases>
+      <!--
+        Snapshots off, and there are none to fetch. Off here as well so a typo'd -SNAPSHOT
+        coordinate fails at resolution rather than silently reaching for something mutable.
+      -->
+      <snapshots>
+        <enabled>false</enabled>
+      </snapshots>
+    </repository>
+  </repositories>
+
+  <dependencyManagement>
+    <dependencies>
+      <!--
+        One version for the whole common set. The modules share the ErrorType interface and the
+        `vaullet.*` property prefix, so a mixed combination is not a supported one — importing
+        the BOM makes that impossible to get wrong by accident.
+      -->
+      <dependency>
+        <groupId>dev.vaullet</groupId>
+        <artifactId>common-bom</artifactId>
+        <version>${common.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <dependencies>
+    <!-- ========================= Platform common ========================= -->
+    <!--
+      The HTTP edge and the security posture. These bring spring-boot-starter-webmvc,
+      -validation, -security and -security-oauth2-resource-server transitively, which is why
+      those four are not declared here: the modules that need them own their versions and their
+      configuration together.
+
+      common-security is worth a sentence on THIS service specifically. Auth Service consumes
+      the shared security library rather than providing one, because ADR-006 makes Keycloak the
+      only token signer in the platform: this service brokers, and never mints. If it ever
+      needed its own token handling, something would have gone wrong.
+    -->
+    <dependency>
+      <groupId>dev.vaullet</groupId>
+      <artifactId>common-web</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>dev.vaullet</groupId>
+      <artifactId>common-security</artifactId>
+    </dependency>
+
+    <!-- ========================== Observability ========================== -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-micrometer-tracing-brave</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-tracing-bridge-brave</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-registry-prometheus</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+
+    <!-- ============================== Docs ============================== -->
+    <!--
+      Declared here even though common-web configures it: the dependency is <optional> there, so
+      a service without a published contract does not pay for it. Asking for springdoc is what
+      switches OpenApiConfiguration on.
+    -->
+    <dependency>
+      <groupId>org.springdoc</groupId>
+      <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+      <version>${springdoc.version}</version>
+    </dependency>
+
+    <!-- ============================ Dev only ============================ -->
+    <!-- Starts compose.yaml automatically on `mvn spring-boot:run` -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-docker-compose</artifactId>
+      <scope>runtime</scope>
+      <optional>true</optional>
+    </dependency>
+
+    <!-- =========================== Persistence =========================== -->
+    <!--
+      JDBC, not JPA — the same sanctioned deviation from the @vaullet-dev template the ledger
+      makes, for a related but smaller reason. The anchor is one table, so an ORM would be more
+      machinery than the thing it manages; and the interesting lines here are WHERE clauses
+      (`status <> 'CLOSED'`, `keycloak_sub IS NULL`) that carry the concurrency argument. A
+      generated statement hides exactly what a reviewer has to read.
+
+      It also keeps one persistence idiom across the platform, so LayeringTest's rule — nothing
+      outside `dao` touches JdbcTemplate — is the same rule in both services.
+    -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-jdbc</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-flyway</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-database-postgresql</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+
+    <!-- ============================= Testing ============================= -->
+    <!--
+      common-test brings the composed @IntegrationTest, the shared PostgreSQL container, the
+      JwtDecoder stand-in and the ArchUnit rule set — and with them spring-boot-testcontainers,
+      testcontainers-postgresql, the webmvc and security test starters, and ArchUnit itself.
+
+      The JwtDecoder stand-in is what makes step 1 buildable before Keycloak exists: it throws
+      rather than returning a stub, tests authenticate with the jwt() post-processor, and the
+      REAL filter chain is assembled and exercised. A permissive test chain would make every
+      security assertion here meaningless.
+    -->
+    <dependency>
+      <groupId>dev.vaullet</groupId>
+      <artifactId>common-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <!--
+      Service-specific test support. Boot 4 splits the old spring-boot-starter-test into
+      per-module test starters, and these four follow this service's own choices: JDBC over JPA,
+      Flyway migrations the tests assert against, and the tracing bridge whose trace id ends up
+      in every error body.
+    -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-jdbc-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-flyway-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-actuator-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-micrometer-tracing-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <configuration>
+          <!-- `mvn spring-boot:run` is the local-development entry point, so it activates the
+               local profile. A deployed `java -jar` gets no profile and therefore the
+               secure-by-default configuration. -->
+          <profiles>
+            <profile>local</profile>
+          </profiles>
+          <image>
+            <!--
+              One tag, and it is immutable. The ledger also pushes `latest`; ADR-010 §4 says a
+              GitOps manifest must never reference a mutable tag, and the simplest way to keep
+              that true is not to publish one. A human who wants the newest build reads the
+              release page, where the number is also the answer to "what is running".
+            -->
+            <name>${image.name}:${project.version}</name>
+            <imagePlatform>${image.platform}</imagePlatform>
+            <env>
+              <!-- Buildpack picks the JDK; keep it pinned to what the POM compiles against. -->
+              <BP_JVM_VERSION>${java.version}</BP_JVM_VERSION>
+            </env>
+          </image>
+        </configuration>
+        <executions>
+          <!--
+            Writes META-INF/build-info.properties into the jar, which Actuator's build-info
+            contributor reads. Without it /actuator/info is an empty object and the only way to
+            tell which build is running is to trust the image tag — which is exactly what you
+            cannot do once someone has repushed one.
+          -->
+          <execution>
+            <id>build-info</id>
+            <goals>
+              <goal>build-info</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!--
+        Resolves ${revision} in the POM that gets installed, so the artefact does not carry the
+        literal string "${revision}" as its version. resolveCiFriendliesOnly substitutes the
+        CI-friendly properties and rewrites nothing else.
+      -->
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>flatten-maven-plugin</artifactId>
+        <version>${flatten-maven-plugin.version}</version>
+        <configuration>
+          <updatePomFile>true</updatePomFile>
+          <flattenMode>resolveCiFriendliesOnly</flattenMode>
+        </configuration>
+        <executions>
+          <execution>
+            <id>flatten</id>
+            <phase>process-resources</phase>
+            <goals>
+              <goal>flatten</goal>
+            </goals>
+          </execution>
+          <execution>
+            <id>flatten-clean</id>
+            <phase>clean</phase>
+            <goals>
+              <goal>clean</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!--
+        The commit is the version that actually matters. A release number says what was
+        intended; the SHA says what was compiled, and only one of the two can be wrong. Both end
+        up in /actuator/info.
+
+        failOnNoGitDirectory=false because the Dockerfile build copies sources without .git —
+        the git block is then absent from /actuator/info rather than failing the build.
+      -->
+      <plugin>
+        <groupId>io.github.git-commit-id</groupId>
+        <artifactId>git-commit-id-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>get-the-git-infos</id>
+            <goals>
+              <goal>revision</goal>
+            </goals>
+          </execution>
+        </executions>
+        <configuration>
+          <failOnNoGitDirectory>false</failOnNoGitDirectory>
+          <generateGitPropertiesFile>true</generateGitPropertiesFile>
+          <generateGitPropertiesFilename>${project.build.outputDirectory}/git.properties</generateGitPropertiesFilename>
+          <!-- Just enough to identify the build; the full set leaks the committer's email. -->
+          <includeOnlyProperties>
+            <includeOnlyProperty>^git.branch$</includeOnlyProperty>
+            <includeOnlyProperty>^git.commit.id.abbrev$</includeOnlyProperty>
+            <includeOnlyProperty>^git.commit.id.full$</includeOnlyProperty>
+            <includeOnlyProperty>^git.commit.time$</includeOnlyProperty>
+            <includeOnlyProperty>^git.dirty$</includeOnlyProperty>
+          </includeOnlyProperties>
+          <commitIdGenerationMode>full</commitIdGenerationMode>
+        </configuration>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <!-- Keeps parameter names for Spring binding and @ConfigurationProperties -->
+          <parameters>true</parameters>
+          <compilerArgs>
+            <arg>-Xlint:all,-processing</arg>
+          </compilerArgs>
+          <annotationProcessorPaths>
+            <path>
+              <groupId>org.springframework.boot</groupId>
+              <artifactId>spring-boot-configuration-processor</artifactId>
+            </path>
+          </annotationProcessorPaths>
+        </configuration>
+      </plugin>
+
+      <!-- Fast unit + slice tests: *Test -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <excludes>
+            <exclude>**/*IT.java</exclude>
+          </excludes>
+        </configuration>
+      </plugin>
+
+      <!-- Docker-backed integration tests: *IT — bound to `mvn verify` -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <executions>
+          <execution>
+            <goals>
+              <goal>integration-test</goal>
+              <goal>verify</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>
