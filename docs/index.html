@@ -1,0 +1,579 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="description" content="Every component in Vaullet's user management, what passes between them, and which system owns which fact about a user.">
+<title>Who Owns the User</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500&family=Quicksand:wght@600;700&display=swap">
+<style>
+:root{
+  --ground:#F5F3EF;
+  --surface:#FFFFFF;
+  --sunk:#EDEAE3;
+  --ink:#1B1B2E;
+  --ink-2:#4A4960;
+  --ink-3:#737288;
+  --rule:#DFDBD2;
+  --rule-strong:#B9B4A8;
+  --kc:#7B61FF;
+  --kc-soft:#EFECFF;
+  --ext:#8D8BA2;
+  --warn-bg:#FBEBD2;
+  --warn-ink:#874A07;
+  --code-bg:#1B1B2E;
+  --code-ink:#E8E6F1;
+  --code-dim:#9D9BB3;
+  --display:"Quicksand", ui-rounded, "Nunito", system-ui, sans-serif;
+  --body:"DM Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono:"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#12121A; --surface:#1A1A25; --sunk:#242333;
+    --ink:#EEEDF6; --ink-2:#B4B2C6; --ink-3:#8D8BA2;
+    --rule:#2C2B3B; --rule-strong:#48465E;
+    --kc:#A392FF; --kc-soft:#241F3D; --ext:#7A7891;
+    --warn-bg:#33260F; --warn-ink:#F2C07A;
+    --code-bg:#0B0B11; --code-ink:#E4E2EE; --code-dim:#8E8CA5;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#12121A; --surface:#1A1A25; --sunk:#242333;
+  --ink:#EEEDF6; --ink-2:#B4B2C6; --ink-3:#8D8BA2;
+  --rule:#2C2B3B; --rule-strong:#48465E;
+  --kc:#A392FF; --kc-soft:#241F3D; --ext:#7A7891;
+  --warn-bg:#33260F; --warn-ink:#F2C07A;
+  --code-bg:#0B0B11; --code-ink:#E4E2EE; --code-dim:#8E8CA5;
+}
+*,*::before,*::after{box-sizing:border-box}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--body);font-size:16.5px;line-height:1.62;padding-inline:clamp(16px,4vw,48px);-webkit-font-smoothing:antialiased}
+.wrap{max-width:1120px;margin-inline:auto;padding-block:52px 104px}
+.prose{max-width:68ch}
+.prose>*+*{margin-top:14px}
+h1,h2{font-family:var(--display);font-weight:700;letter-spacing:-.01em;text-wrap:balance;margin:0}
+h1{font-size:clamp(2.3rem,5.2vw,3.5rem);line-height:1.04}
+h2{font-size:clamp(1.55rem,3vw,2rem);line-height:1.15}
+h3{font-family:var(--body);font-size:1.02rem;font-weight:700;line-height:1.35;margin:0;text-wrap:balance}
+p{margin:0}
+ul{margin:0}
+.eyebrow{font-size:.74rem;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
+.lede{font-size:1.14rem;color:var(--ink-2);max-width:64ch}
+a{color:inherit;text-decoration-thickness:1px;text-underline-offset:3px}
+a:hover{text-decoration-thickness:2px}
+a:focus-visible,summary:focus-visible{outline:2px solid var(--ink);outline-offset:3px;border-radius:6px}
+header.top{display:grid;gap:18px}
+.toc{display:flex;flex-wrap:wrap;gap:6px 20px;font-size:.92rem;color:var(--ink-2)}
+section.sec{margin-top:72px;padding-top:28px;border-top:1px solid var(--rule);display:grid;gap:20px}
+.id{font-family:var(--body);font-weight:600;font-size:.93em;background:var(--sunk);padding:.04em .36em;border-radius:5px;white-space:nowrap}
+
+.answer{background:var(--surface);border:1px solid var(--rule);border-left:4px solid var(--ink);border-radius:14px;padding:20px 22px;display:grid;gap:8px;max-width:72ch}
+.answer strong{font-family:var(--display);font-size:1.22rem;font-weight:700}
+
+.duo{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.panel{background:var(--surface);border:1px solid var(--rule);border-radius:18px;padding:22px;display:flex;flex-direction:column;gap:11px}
+.panel.kc{border-color:var(--kc);background:var(--kc-soft)}
+.panel .q{font-family:var(--display);font-size:1.26rem;font-weight:700;line-height:1.2}
+.panel ul{padding-left:1.1em;font-size:.94rem;display:grid;gap:5px}
+.panel .not{font-size:.9rem;color:var(--ink-2);border-top:1px dashed var(--rule-strong);padding-top:10px;margin-top:auto}
+
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:.74rem;font-weight:600;line-height:1;padding:5px 9px;border-radius:999px;border:1px solid var(--rule-strong);color:var(--ink-2);white-space:nowrap}
+.chip.core{background:var(--ink);border-color:var(--ink);color:var(--ground)}
+.chip.plan{border-style:dashed}
+.chip.gap{background:var(--warn-bg);border-color:transparent;color:var(--warn-ink)}
+.chip.kc{background:var(--kc);border-color:var(--kc);color:#fff}
+
+.tbl{overflow-x:auto;background:var(--surface);border:1px solid var(--rule);border-radius:14px}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+th,td{text-align:left;vertical-align:top;padding:10px 14px;border-bottom:1px solid var(--rule)}
+tbody tr:last-child>*{border-bottom:0}
+thead th{font-size:.72rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);background:var(--sunk);white-space:nowrap}
+td.term{font-weight:700}
+.muted{color:var(--ink-2)}
+.own{font-weight:700;white-space:nowrap;display:inline-flex;align-items:center;gap:7px}
+.own::before{content:"";width:10px;height:10px;border-radius:3px;background:var(--sw,var(--ink));flex:none}
+.own.k{--sw:var(--kc)}
+.own.v{--sw:var(--ink)}
+.own.l{--sw:var(--ext)}
+
+figure{margin:0;background:var(--surface);border:1px solid var(--rule);border-radius:18px;padding:18px 18px 16px}
+.fig-scroll{overflow-x:auto}
+figure svg{display:block;width:100%;height:auto;font-family:var(--body);color:var(--ink)}
+.svg-wide{min-width:920px}
+.svg-mid{min-width:820px}
+figcaption{margin-top:12px;font-size:.9rem;color:var(--ink-2);max-width:80ch}
+
+.s-box{fill:var(--surface);stroke:var(--rule-strong);stroke-width:1.2}
+.s-box-key{fill:var(--ink);stroke:var(--ink);stroke-width:2}
+.s-box-kc{fill:var(--kc-soft);stroke:var(--kc);stroke-width:1.6}
+.s-box-ext{fill:var(--surface);stroke:var(--ext);stroke-width:1.2;stroke-dasharray:6 5}
+.s-store{fill:var(--sunk);stroke:var(--rule-strong);stroke-width:1.2}
+.s-hold{fill:none;stroke:var(--rule-strong);stroke-width:1.2;stroke-dasharray:3 4}
+.s-t{fill:var(--ink);font-size:13px}
+.s-tb{fill:var(--ink);font-size:13.5px;font-weight:700}
+.s-on{fill:var(--ground);font-size:14px;font-weight:700}
+.s-on-m{fill:var(--ground);font-size:11.5px;font-weight:500;opacity:.85}
+.s-m{fill:var(--ink-3);font-size:11.5px}
+.s-mb{fill:var(--ink-2);font-size:11.5px;font-weight:600}
+.s-kc{fill:var(--kc);font-size:11.5px;font-weight:700}
+.s-warn{fill:var(--warn-ink);font-size:11.5px;font-weight:600}
+.s-e{fill:none;stroke:var(--ink-2);stroke-width:1.4}
+.s-e-key{fill:none;stroke:var(--ink);stroke-width:3}
+.s-e-ext{fill:none;stroke:var(--ext);stroke-width:1.4;stroke-dasharray:6 5}
+.s-e-dot{fill:none;stroke:var(--rule-strong);stroke-width:1.2;stroke-dasharray:2 5}
+.s-arrow{fill:var(--ink-2)}
+.s-arrow-key{fill:var(--ink)}
+.s-arrow-ext{fill:var(--ext)}
+.s-label-bg{fill:var(--surface)}
+
+pre{margin:0;background:var(--code-bg);color:var(--code-ink);font-family:var(--mono);font-size:.8rem;line-height:1.6;padding:18px 20px;border-radius:12px;overflow-x:auto}
+pre .c{color:var(--code-dim)}
+details{background:var(--surface);border:1px solid var(--rule);border-radius:14px}
+summary{cursor:pointer;padding:13px 16px;font-weight:600}
+details[open]>summary{border-bottom:1px solid var(--rule)}
+details .body{padding:14px 16px;display:grid;gap:12px;font-size:.94rem}
+
+.cols{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:28px}
+.col{display:grid;gap:10px;align-content:start}
+.col ul{padding-left:1.1em;display:grid;gap:7px;font-size:.95rem}
+
+footer.src{margin-top:80px;padding-top:22px;border-top:1px solid var(--rule);font-size:.86rem;color:var(--ink-2);display:grid;gap:8px;max-width:80ch}
+
+@media (max-width:860px){ .duo,.cols{grid-template-columns:1fr} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <p class="eyebrow">ADR-014 · user management in local identity mode · 16 September 2026</p>
+  <h1>who owns the user</h1>
+  <p class="lede">Every component that touches a Vaullet user, what passes between them, and which of them holds the record that decides. The short version is that two systems hold two different objects about the same person, and almost every design mistake here comes from treating them as one.</p>
+  <nav class="toc" aria-label="Sections">
+    <a href="#map">the map</a>
+    <a href="#who">who is who</a>
+    <a href="#owns">who owns which fact</a>
+    <a href="#create">creating an account</a>
+    <a href="#freeze">the freeze path</a>
+    <a href="#modes">local against federated</a>
+    <a href="#build">what exists</a>
+  </nav>
+</header>
+
+<div class="answer">
+  <strong>Keycloak owns the identity. Vaullet owns the account.</strong>
+  <p>Keycloak holds the person who logs in — credentials, MFA, email, name, roles. Vaullet holds the thing money is keyed to: an <span class="id">account_id</span>, a status, and a reference back. Neither is a copy of the other, so neither can go stale against the other, and there is no reconciliation job anywhere in this design.</p>
+</div>
+
+<section class="sec" id="map">
+  <p class="eyebrow">every component and every edge</p>
+  <h2>the map</h2>
+  <p class="prose">User management adds no new service. It is a capability of <span class="id">Auth Service</span>, switched on by <span class="id">auth.provider: local</span>, and it is the only Vaullet-written component on this page. Everything else here already exists for other reasons.</p>
+
+  <figure>
+    <div class="fig-scroll">
+      <svg class="svg-wide" viewBox="0 0 1000 700" role="img" aria-label="Component map: callers reach the API Gateway, which reaches Auth Service; Auth Service calls the Keycloak vaullet realm over the Admin REST API and writes the accounts anchor in identity_schema; end users reach Keycloak's hosted pages directly; Kafka carries audit events out and account-lock events in.">
+        <defs>
+          <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="s-arrow"/></marker>
+          <marker id="ak" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="s-arrow-key"/></marker>
+          <marker id="ae" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="s-arrow-ext"/></marker>
+        </defs>
+
+        <!-- auth_db container -->
+        <rect x="436" y="300" width="540" height="150" rx="16" class="s-hold"/>
+        <text x="448" y="320" class="s-mb">auth_db · one database, two schemas, no foreign key between them</text>
+
+        <!-- callers -->
+        <rect x="24" y="30" width="170" height="56" rx="12" class="s-box"/>
+        <text x="40" y="54" class="s-tb">Admin UI</text>
+        <text x="40" y="72" class="s-m">operator staff</text>
+
+        <rect x="24" y="100" width="170" height="56" rx="12" class="s-box"/>
+        <text x="40" y="124" class="s-tb">Operator backend</text>
+        <text x="40" y="142" class="s-m">server to server</text>
+
+        <rect x="24" y="170" width="170" height="56" rx="12" class="s-box-ext"/>
+        <text x="40" y="194" class="s-tb">End user</text>
+        <text x="40" y="212" class="s-m">their own browser</text>
+
+        <!-- gateway -->
+        <rect x="248" y="44" width="152" height="130" rx="12" class="s-box"/>
+        <text x="264" y="70" class="s-tb">API Gateway</text>
+        <text x="264" y="94" class="s-m">validates the token</text>
+        <text x="264" y="112" class="s-m">checks the status</text>
+        <text x="264" y="130" class="s-m">enforces scope</text>
+        <text x="264" y="148" class="s-m">propagates account_id</text>
+
+        <rect x="248" y="204" width="152" height="56" rx="12" class="s-store"/>
+        <text x="264" y="228" class="s-tb">Redis</text>
+        <text x="264" y="246" class="s-m">status cache</text>
+
+        <!-- auth service -->
+        <rect x="452" y="30" width="200" height="200" rx="14" class="s-box-key"/>
+        <text x="470" y="58" class="s-on">Auth Service</text>
+        <text x="470" y="76" class="s-on-m">wallet-auth-service</text>
+        <text x="470" y="108" class="s-on-m">holds the anchor</text>
+        <text x="470" y="128" class="s-on-m">fronts Keycloak admin</text>
+        <text x="470" y="148" class="s-on-m">provisions on first login</text>
+        <text x="470" y="168" class="s-on-m">enforces the status</text>
+        <text x="470" y="188" class="s-on-m">brokers token exchange</text>
+        <text x="470" y="214" class="s-on-m">never signs a token</text>
+
+        <!-- keycloak -->
+        <rect x="760" y="30" width="216" height="230" rx="14" class="s-box-kc"/>
+        <text x="774" y="50" class="s-kc">KEYCLOAK · the only token signer</text>
+
+        <rect x="776" y="62" width="184" height="90" rx="10" class="s-box"/>
+        <text x="790" y="84" class="s-tb">realm: vaullet</text>
+        <text x="790" y="102" class="s-m">end users, credentials, MFA</text>
+        <text x="790" y="118" class="s-m">email, name, realm roles</text>
+        <text x="790" y="134" class="s-m">every identity read lands here</text>
+
+        <rect x="776" y="168" width="184" height="76" rx="10" class="s-box-ext"/>
+        <text x="790" y="190" class="s-tb">realm: vaullet-admin</text>
+        <text x="790" y="208" class="s-m">operator staff, no broker</text>
+        <text x="790" y="226" class="s-warn">Auth Service holds no rights here</text>
+
+        <!-- schemas -->
+        <rect x="452" y="336" width="196" height="98" rx="12" class="s-store"/>
+        <text x="468" y="360" class="s-tb">identity_schema</text>
+        <text x="468" y="380" class="s-m">accounts — the anchor</text>
+        <text x="468" y="398" class="s-m">api_clients</text>
+        <text x="468" y="420" class="s-mb">ours · we migrate it</text>
+
+        <rect x="764" y="336" width="196" height="98" rx="12" class="s-store"/>
+        <text x="780" y="360" class="s-tb">keycloak_schema</text>
+        <text x="780" y="380" class="s-m">users, credentials</text>
+        <text x="780" y="398" class="s-m">sessions, brokers</text>
+        <text x="780" y="420" class="s-kc">Keycloak migrates it</text>
+
+        <!-- kafka -->
+        <rect x="24" y="510" width="952" height="46" rx="12" class="s-store"/>
+        <text x="44" y="539" class="s-tb">Kafka</text>
+
+        <rect x="300" y="600" width="180" height="56" rx="12" class="s-box"/>
+        <text x="316" y="624" class="s-tb">Audit Service</text>
+        <text x="316" y="642" class="s-m">core, every deployment</text>
+
+        <rect x="560" y="600" width="200" height="56" rx="12" class="s-box"/>
+        <text x="576" y="624" class="s-tb">Risk Management</text>
+        <text x="576" y="642" class="s-m">sellable module</text>
+
+        <!-- edges -->
+        <path d="M194,58 H242" class="s-e" marker-end="url(#a)"/>
+
+        <path d="M194,128 H242" class="s-e" marker-end="url(#a)"/>
+
+        <path d="M194,198 H232 V280 H690 V130 H770" class="s-e-ext" marker-end="url(#ae)"/>
+        <text x="244" y="272" class="s-mb">hosted login, registration and password reset — these never touch Vaullet</text>
+
+        <path d="M400,100 H446" class="s-e" marker-end="url(#a)"/>
+        <text x="426" y="92" text-anchor="middle" class="s-mb">token</text>
+
+        <path d="M324,174 V198" class="s-e" marker-end="url(#a)"/>
+        <text x="332" y="192" class="s-m">read</text>
+
+        <path d="M452,215 H406" class="s-e" marker-end="url(#a)"/>
+        <text x="432" y="250" text-anchor="middle" class="s-m">invalidate</text>
+
+        <path d="M652,100 H770" class="s-e-key" marker-end="url(#ak)"/>
+        <text x="703" y="88" text-anchor="middle" class="s-mb">Admin REST API</text>
+
+        <path d="M550,230 V330" class="s-e" marker-end="url(#a)"/>
+        <text x="558" y="266" class="s-m">the anchor</text>
+
+        <path d="M862,260 V330" class="s-e" marker-end="url(#a)"/>
+        <text x="870" y="296" class="s-m">its own</text>
+
+        <path d="M490,236 V288 H418 V504" class="s-e" marker-start="url(#a)" marker-end="url(#a)"/>
+        <rect x="118" y="466" width="300" height="17" rx="4" class="s-label-bg"/>
+        <text x="410" y="479" text-anchor="end" class="s-mb">audit events out · risk.account-locked in</text>
+
+        <path d="M390,556 V594" class="s-e" marker-end="url(#a)"/>
+        <path d="M660,600 V562" class="s-e" marker-end="url(#a)"/>
+      </svg>
+    </div>
+    <figcaption>Solid edges are synchronous calls. The dashed edge is the end user talking to Keycloak directly, which is the default — Vaullet never sees a password. The heavy edge is the one this design turns on: every identity read and write is a live call to the Keycloak Admin REST API, and nothing is copied into a Vaullet table. Every other service in the platform sits downstream of the gateway, keys on <span class="id">account_id</span>, and appears nowhere on this map because it never calls Auth Service at all.</figcaption>
+  </figure>
+</section>
+
+<section class="sec" id="who">
+  <p class="eyebrow">the cast</p>
+  <h2>who is who</h2>
+  <p class="prose">Eleven things appear on the map and exactly one of them is new work. The rest are components ADR-005 already places in the cluster, doing here what they do everywhere else.</p>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Component</th><th>Its job in user management</th><th>ADR-005 class</th><th>Today</th></tr></thead>
+      <tbody>
+        <tr><td class="term">Auth Service</td><td>The only Vaullet code in this module. Owns the anchor, fronts Keycloak's admin API, provisions on first login, enforces the status.</td><td class="muted">Core</td><td><span class="chip gap">repo not created</span></td></tr>
+        <tr><td class="term">Keycloak · <span class="id">vaullet</span> realm</td><td>Every end user: credentials, MFA, profile, realm roles, and the hosted login and registration pages. Signs every token in both modes.</td><td class="muted">Platform</td><td><span class="chip plan">planned</span></td></tr>
+        <tr><td class="term">Keycloak · <span class="id">vaullet-admin</span> realm</td><td>Operator staff, with no identity broker configured. It is the break-glass boundary, so Auth Service is given no rights over it.</td><td class="muted">Platform</td><td><span class="chip plan">planned</span></td></tr>
+        <tr><td class="term">API Gateway</td><td>Validates the token against Keycloak's JWKS, checks the account status, enforces scope, passes <span class="id">account_id</span> down.</td><td class="muted">Core</td><td><span class="chip plan">planned</span></td></tr>
+        <tr><td class="term">Redis</td><td>Caches the account status so the gateway need not read Postgres per request. Auth Service invalidates it on every status change.</td><td class="muted">Platform</td><td><span class="chip plan">planned</span></td></tr>
+        <tr><td class="term"><span class="id">identity_schema</span></td><td>Two tables: <span class="id">accounts</span>, the anchor the ledger keys on, and <span class="id">api_clients</span>.</td><td class="muted">ours</td><td><span class="chip plan">planned</span></td></tr>
+        <tr><td class="term"><span class="id">keycloak_schema</span></td><td>Keycloak's own tables in the same database, on their own migration lifecycle. We never write them and never reference them.</td><td class="muted">Keycloak's</td><td><span class="chip plan">planned</span></td></tr>
+        <tr><td class="term">Kafka</td><td>Carries audit events out of Auth Service, and <span class="id">risk.account-locked</span> in.</td><td class="muted">Platform</td><td><span class="chip plan">planned</span></td></tr>
+        <tr><td class="term">Audit Service</td><td>Records every role change, every status change and every account closure. Core for licensing, not for architecture.</td><td class="muted">Core</td><td><span class="chip plan">planned</span></td></tr>
+        <tr><td class="term">Risk Management</td><td>The only component that freezes an account without a human doing it, and it does so through an event rather than a call.</td><td class="muted">Sellable</td><td><span class="chip plan">planned</span></td></tr>
+        <tr><td class="term">Admin UI</td><td>Where operator staff actually do user administration. Every button here is one of the endpoints on the map.</td><td class="muted">Core</td><td><span class="chip plan">planned</span></td></tr>
+        <tr><td class="term">Ledger and the other services</td><td>Nothing. They receive <span class="id">account_id</span> from the gateway and never call Auth Service — which is why they are not on the map.</td><td class="muted">—</td><td><span class="chip core">ledger has code</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="prose"><strong>None of it runs yet.</strong> The cluster has OpenBao, Traefik and Argo CD; the only service with code is the ledger, and it is not deployed. This map is a target, not a survey.</p>
+</section>
+
+<section class="sec" id="owns">
+  <p class="eyebrow">the rule</p>
+  <h2>who owns which fact</h2>
+  <p class="prose">One rule settles every field: <strong>whoever owns a fact's failure mode owns the fact.</strong> If getting it wrong is an authentication problem, it is Keycloak's. If getting it wrong is a money problem, it is ours.</p>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Fact</th><th>Owner</th><th>Why it lands there</th></tr></thead>
+      <tbody>
+        <tr><td class="term">Password hashes, MFA enrolment, recovery codes, sessions, failed-login counters, password policy</td><td><span class="own k">Keycloak</span></td><td>ADR-006 decided not to write authentication. Never mirrored, never read, never in a Vaullet backup.</td></tr>
+        <tr><td class="term">Username, email, name, phone, locale, email-verified</td><td><span class="own k">Keycloak</span></td><td>Registration data it already stores. A second copy buys a sync problem and nothing else.</td></tr>
+        <tr><td class="term">Role assignment</td><td><span class="own k">Keycloak assigns</span></td><td>…but Vaullet enforces what a role <em>means</em>. Separation of duties is ledger and audit state, which no directory can express.</td></tr>
+        <tr><td class="term"><span class="id">account_id</span></td><td><span class="own v">Vaullet</span></td><td>It keys seven years of immutable journal. It must outlive Keycloak, a realm re-import, and a change of identity provider.</td></tr>
+        <tr><td class="term"><span class="id">status</span> — the freeze</td><td><span class="own v">Vaullet</span></td><td>A fraud lock the operator's directory can overrule is not a fraud lock. Keycloak's own <span class="id">enabled</span> flag is the secondary control, never the primary.</td></tr>
+        <tr><td class="term"><span class="id">external_ref</span></td><td><span class="own v">Vaullet</span></td><td>The operator's own user id. Promised unique and immutable to integrators, so it has to be a constraint.</td></tr>
+        <tr><td class="term">Balances, holds, journal</td><td><span class="own l">Ledger</span></td><td>A different database and a different service, reached only by <span class="id">account_id</span>.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="duo">
+    <article class="panel kc">
+      <p class="q">What Keycloak holds</p>
+      <p>The person who logs in. It is replaceable in principle — and the anchor is what makes replacing it survivable — but while it is there, it is the only authority on identity.</p>
+      <ul>
+        <li>The complete credential and session story</li>
+        <li>Whatever profile the operator collects at registration</li>
+        <li>Realm roles, and the hosted pages users see</li>
+      </ul>
+      <p class="not">It never learns a balance, and never learns that an account was frozen for fraud.</p>
+    </article>
+    <article class="panel">
+      <p class="q">What Vaullet holds</p>
+      <p>Four columns. That is the entire user record on our side, in both modes, and it is deliberately too boring to be worth breaching.</p>
+      <ul>
+        <li><span class="id">account_id</span> — permanent, and the only thing money knows</li>
+        <li><span class="id">keycloak_sub</span> — nullable, because an account can exist before an identity does</li>
+        <li><span class="id">external_ref</span> — the operator's id, unique, never updated</li>
+        <li><span class="id">status</span> — ACTIVE, SUSPENDED or CLOSED</li>
+      </ul>
+      <p class="not">No email, no name, no date of birth, no document. Under federation that is a selling point; under local mode it is just restraint.</p>
+    </article>
+  </div>
+</section>
+
+<section class="sec" id="create">
+  <p class="eyebrow">the awkward operation</p>
+  <h2>creating an account</h2>
+  <p class="prose">Everything else on this page is a single call to a single system. Creating a user is three writes across two systems with no transaction spanning them, so it is the one place the split costs something. The answer is not a distributed transaction; it is that every step is idempotent and the repair already exists.</p>
+
+  <figure>
+    <div class="fig-scroll">
+      <svg class="svg-mid" viewBox="0 0 940 440" role="img" aria-label="Sequence: the operator backend posts to /v1/accounts; Auth Service creates the Keycloak realm user, receives the subject, inserts the anchor row, writes account_id back as a Keycloak attribute, and returns 201. Two crash points are marked, each with its repair.">
+        <defs>
+          <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="s-arrow"/></marker>
+        </defs>
+
+        <rect x="30" y="20" width="180" height="44" rx="10" class="s-box"/>
+        <text x="120" y="48" text-anchor="middle" class="s-tb">Operator backend</text>
+
+        <rect x="270" y="20" width="180" height="44" rx="10" class="s-box-key"/>
+        <text x="360" y="48" text-anchor="middle" class="s-on">Auth Service</text>
+
+        <rect x="510" y="20" width="180" height="44" rx="10" class="s-box-kc"/>
+        <text x="600" y="48" text-anchor="middle" class="s-tb">Keycloak</text>
+
+        <rect x="750" y="20" width="180" height="44" rx="10" class="s-store"/>
+        <text x="840" y="48" text-anchor="middle" class="s-tb">identity_schema</text>
+
+        <path d="M120,64 V420" class="s-e-dot"/>
+        <path d="M360,64 V420" class="s-e-dot"/>
+        <path d="M600,64 V420" class="s-e-dot"/>
+        <path d="M840,64 V420" class="s-e-dot"/>
+
+        <path d="M120,110 H356" class="s-e" marker-end="url(#b)"/>
+        <text x="238" y="101" text-anchor="middle" class="s-mb">POST /v1/accounts { username, email, external_ref }</text>
+
+        <path d="M360,158 H596" class="s-e" marker-end="url(#b)"/>
+        <text x="478" y="149" text-anchor="middle" class="s-mb">create the realm user, set the password</text>
+
+        <path d="M596,198 H364" class="s-e-dot" marker-end="url(#b)"/>
+        <text x="480" y="190" text-anchor="middle" class="s-m">keycloak_sub</text>
+
+        <path d="M352,224 L368,240 M368,224 L352,240" class="s-e"/>
+        <rect x="376" y="222" width="512" height="20" rx="4" class="s-label-bg"/>
+        <text x="384" y="236" class="s-warn">crash here → a realm user with no anchor, linked by just-in-time provisioning at first login</text>
+
+        <path d="M360,290 H836" class="s-e" marker-end="url(#b)"/>
+        <rect x="430" y="270" width="470" height="18" rx="4" class="s-label-bg"/>
+        <text x="598" y="283" text-anchor="middle" class="s-mb">INSERT accounts (account_id, keycloak_sub, external_ref, ACTIVE)</text>
+
+        <path d="M352,316 L368,332 M368,316 L352,332" class="s-e"/>
+        <rect x="376" y="314" width="500" height="20" rx="4" class="s-label-bg"/>
+        <text x="384" y="328" class="s-warn">crash here → tokens carry no account_id, rewritten at the next authentication</text>
+
+        <path d="M360,378 H596" class="s-e" marker-end="url(#b)"/>
+        <text x="478" y="369" text-anchor="middle" class="s-mb">set account_id as a user attribute</text>
+
+        <path d="M356,418 H124" class="s-e-dot" marker-end="url(#b)"/>
+        <text x="240" y="410" text-anchor="middle" class="s-m">201 { account_id }</text>
+      </svg>
+    </div>
+    <figcaption>Neither crash needs new machinery. Just-in-time provisioning has to exist anyway — it is the only way a federated user ever gets an anchor — so the local-mode create path inherits its recovery for free. Retries key on <span class="id">external_ref</span> when the operator supplies one, and on the username otherwise.</figcaption>
+  </figure>
+
+  <details>
+    <summary>The anchor, as ADR-014 amends it</summary>
+    <div class="body">
+      <p>Three changes to what ADR-006 wrote, each closing an open item: <span class="id">keycloak_sub</span> becomes nullable so an account can be provisioned before its user has ever logged in (B2), <span class="id">external_ref</span> gets the column its promises need (B3), and <span class="id">LOCKED</span> becomes <span class="id">SUSPENDED</span> — both because ADR-012 already published that word to operators, and because "locked" is what Keycloak calls a user it has temporarily locked out after too many bad passwords, which is a different thing entirely.</p>
+<pre>CREATE TABLE accounts (
+    account_id    UUID PRIMARY KEY,
+    keycloak_sub  UUID        NULL,        <span class="c">-- null while unlinked; set at first authentication</span>
+    external_ref  TEXT        NULL,        <span class="c">-- operator's own user id; immutable once set</span>
+    status        TEXT        NOT NULL CHECK (status IN ('ACTIVE','SUSPENDED','CLOSED')),
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (keycloak_sub),
+    UNIQUE (external_ref)
+);</pre>
+    </div>
+  </details>
+</section>
+
+<section class="sec" id="freeze">
+  <p class="eyebrow">why the split is worth it</p>
+  <h2>the freeze path</h2>
+  <p class="prose">This is the one sequence that explains the whole design. It runs identically in both modes, it never asks the operator's directory for permission, and it is the reason the status column cannot live in Keycloak.</p>
+
+  <figure>
+    <div class="fig-scroll">
+      <svg class="svg-mid" viewBox="0 0 960 215" role="img" aria-label="Freeze path: Risk Management publishes risk.account-locked to Kafka; Auth Service consumes it, sets accounts.status to SUSPENDED, invalidates the Redis cache, and the gateway refuses the next request. Disabling the Keycloak user is a secondary measure only.">
+        <defs>
+          <marker id="c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="s-arrow"/></marker>
+        </defs>
+
+        <rect x="24" y="36" width="132" height="62" rx="11" class="s-box"/>
+        <text x="90" y="62" text-anchor="middle" class="s-tb" style="font-size:12.5px">Risk Management</text>
+        <text x="90" y="80" text-anchor="middle" class="s-m">freezes an account</text>
+
+        <rect x="178" y="36" width="132" height="62" rx="11" class="s-store"/>
+        <text x="244" y="62" text-anchor="middle" class="s-tb">Kafka</text>
+        <text x="244" y="80" text-anchor="middle" class="s-m">risk.account-locked</text>
+
+        <rect x="332" y="36" width="132" height="62" rx="11" class="s-box-key"/>
+        <text x="398" y="62" text-anchor="middle" class="s-on">Auth Service</text>
+        <text x="398" y="80" text-anchor="middle" class="s-on-m">consumes it</text>
+
+        <rect x="486" y="36" width="132" height="62" rx="11" class="s-store"/>
+        <text x="552" y="62" text-anchor="middle" class="s-tb">accounts.status</text>
+        <text x="552" y="80" text-anchor="middle" class="s-m">= SUSPENDED</text>
+
+        <rect x="640" y="36" width="132" height="62" rx="11" class="s-store"/>
+        <text x="706" y="62" text-anchor="middle" class="s-tb">Redis</text>
+        <text x="706" y="80" text-anchor="middle" class="s-m">invalidated</text>
+
+        <rect x="794" y="36" width="132" height="62" rx="11" class="s-box"/>
+        <text x="860" y="62" text-anchor="middle" class="s-tb">API Gateway</text>
+        <text x="860" y="80" text-anchor="middle" class="s-m">refuses the next call</text>
+
+        <path d="M156,67 H174" class="s-e" marker-end="url(#c)"/>
+        <path d="M310,67 H328" class="s-e" marker-end="url(#c)"/>
+        <path d="M464,67 H482" class="s-e" marker-end="url(#c)"/>
+        <path d="M618,67 H636" class="s-e" marker-end="url(#c)"/>
+        <path d="M772,67 H790" class="s-e" marker-end="url(#c)"/>
+
+        <path d="M398,98 V138" class="s-e-ext" marker-end="url(#c)"/>
+        <rect x="332" y="144" width="594" height="56" rx="11" class="s-box-ext"/>
+        <text x="348" y="166" class="s-tb">Keycloak enabled = false</text>
+        <text x="348" y="186" class="s-m">Done as well, and second. On its own it stops new logins while a token already issued keeps working.</text>
+      </svg>
+    </div>
+    <figcaption>Vaullet will refuse a user the operator's own identity provider still considers perfectly fine. That asymmetry is deliberate, it has to be in the contract, and it only works because the authoritative status sits in a table we own.</figcaption>
+  </figure>
+</section>
+
+<section class="sec" id="modes">
+  <p class="eyebrow">the two ways of managing users</p>
+  <h2>local against federated</h2>
+  <p class="prose">User management is not something an operator buys. It arrives with <span class="id">auth.provider: local</span> and is unavailable under <span class="id">federated</span>, where the operator's own directory does the job. What matters is how little else differs.</p>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>&nbsp;</th><th>auth.provider: local</th><th>auth.provider: federated</th></tr></thead>
+      <tbody>
+        <tr><td class="term">Who holds the user</td><td>Keycloak realm users. Vaullet is the identity provider.</td><td>The operator's OIDC or SAML provider, brokered into the same realm.</td></tr>
+        <tr><td class="term">Registration</td><td>Keycloak's hosted pages by default, or <span class="id">POST /v1/accounts</span> for operator-driven provisioning.</td><td>The operator's own signup. Nothing on this page is involved.</td></tr>
+        <tr><td class="term">Password and MFA</td><td>Keycloak's, configured per realm as declarative YAML.</td><td>Upstream. Vaullet never sees a credential at all.</td></tr>
+        <tr><td class="term">Identity sub-resources</td><td>Present.</td><td><span class="id">404 ENDPOINT_NOT_AVAILABLE</span>, and <span class="id">/v1/capabilities</span> says so.</td></tr>
+        <tr><td class="term"><span class="id">keycloak_sub</span> when the account is created</td><td>Known immediately — the realm user is made first.</td><td>Null. Linked at first authentication.</td></tr>
+        <tr><td class="term">The anchor</td><td colspan="2" class="muted">Identical. Same four columns, same constraints, same owner.</td></tr>
+        <tr><td class="term">The freeze</td><td colspan="2" class="muted">Identical, and authoritative in both. This is what ADR-006 refused to compromise on.</td></tr>
+        <tr><td class="term">The token</td><td colspan="2" class="muted">Identical — same realm, same signing key, same claim set. No other service can tell the modes apart, which is the entire point of ADR-005's fourth category.</td></tr>
+        <tr><td class="term">PII in a Vaullet table</td><td colspan="2" class="muted">None, in either mode.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>The surface, and who may call it</h3>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Endpoint</th><th>Answered from</th><th>Role</th><th>Mode</th></tr></thead>
+      <tbody>
+        <tr><td class="term">POST /v1/accounts</td><td>Keycloak, then our table</td><td class="muted">SUPER_ADMIN, machine client</td><td><span class="chip">both</span></td></tr>
+        <tr><td class="term">GET /v1/accounts/{id}</td><td>our table</td><td class="muted">SUPPORT_AGENT and up</td><td><span class="chip">both</span></td></tr>
+        <tr><td class="term">GET /v1/accounts/by-ref/{external_ref}</td><td>our table</td><td class="muted">SUPPORT_AGENT and up</td><td><span class="chip">both</span></td></tr>
+        <tr><td class="term">PATCH /v1/accounts/{id}</td><td>our table, then Redis</td><td class="muted">FRAUD_REVIEWER</td><td><span class="chip">both</span></td></tr>
+        <tr><td class="term">GET · PATCH /v1/accounts/{id}/identity</td><td>Keycloak, live</td><td class="muted">SUPER_ADMIN</td><td><span class="chip core">local</span></td></tr>
+        <tr><td class="term">POST /v1/accounts/{id}/password-reset</td><td>Keycloak sends the mail</td><td class="muted">SUPPORT_AGENT and up</td><td><span class="chip core">local</span></td></tr>
+        <tr><td class="term">GET · PUT /v1/accounts/{id}/roles</td><td>Keycloak, live</td><td class="muted">SUPER_ADMIN</td><td><span class="chip core">local</span></td></tr>
+        <tr><td class="term">GET /v1/accounts?email=&amp;status=</td><td>Keycloak's search, intersected</td><td class="muted">SUPPORT_AGENT and up</td><td><span class="chip core">local</span></td></tr>
+        <tr><td class="term">DELETE /v1/accounts/{id}</td><td>both — CLOSED here, erased there</td><td class="muted">SUPER_ADMIN</td><td><span class="chip core">local</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="prose">The freeze sits on <span class="id">PATCH /v1/accounts/{id}</span> and user administration sits on the sub-resources, so the two are different endpoints held by different roles with different audit trails. ADR-006's separation of duties comes out of the URL layout rather than being enforced on top of it.</p>
+</section>
+
+<section class="sec" id="build">
+  <p class="eyebrow">before anyone writes code</p>
+  <h2>what exists, and what comes first</h2>
+  <div class="cols">
+    <div class="col">
+      <h3>Build order</h3>
+      <ul>
+        <li><strong>The anchor.</strong> Migration, repository, <span class="id">POST</span> and <span class="id">GET /v1/accounts</span>, the by-ref lookup. Federated mode is complete here, and the ledger finally gains a creator for the account row it has never had one for.</li>
+        <li><strong>Token validation</strong>, the <span class="id">account_id</span> protocol mapper, and just-in-time provisioning.</li>
+        <li><strong>Status enforcement</strong> and the Redis-cached gateway check.</li>
+        <li><strong>The Keycloak admin client</strong> and the identity sub-resources — the subject of this page.</li>
+        <li><strong>Machine clients and token exchange</strong>, which nothing else depends on.</li>
+      </ul>
+    </div>
+    <div class="col">
+      <h3>Deliberately not now</h3>
+      <ul>
+        <li><strong>A local read projection.</strong> Rejected as ADR-014's first alternative, with a named trigger: an admin user list slower than about a second, or a filter spanning <span class="id">status</span> and a profile field. Writes are identical either way, so it stays a pure addition.</li>
+        <li><strong>Bulk import.</strong> A migrating operator needs it and will drive a per-user REST loop until it is designed.</li>
+        <li><strong>End users editing their own profile</strong> — that is Keycloak's account console, not our API.</li>
+      </ul>
+    </div>
+  </div>
+  <p class="prose">One question ADR-014 does not settle: whether self-service registration should point at Keycloak's hosted pages, which is the default and needs no code, or run through <span class="id">POST /v1/accounts</span>. If the hosted pages are good enough for a local-mode operator, the API surface here is admin-facing only, and that is a considerably smaller thing to build than "user CRUD" suggests.</p>
+</section>
+
+<footer class="src">
+  <p><strong>Sources.</strong> ADR-014 (accepted 16 September 2026), which extends ADR-006 and closes open items B2 and B3; ADR-003 for the <span class="id">auth_db</span> schema split; ADR-005 for the component categories; ADR-008 for scopes; ADR-012 for the published API surface.</p>
+  <p>Nothing described here is deployed. <span class="id">wallet-auth-service</span> does not exist yet, and the only service with code is the ledger.</p>
+</footer>
+
+</div>
+</body>
+</html>
