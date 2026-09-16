@@ -1,0 +1,46 @@
+# Local dependencies. Started and stopped automatically by spring-boot-docker-compose
+# when the application runs under the `local` profile — `docker compose up` by hand is
+# optional, not required.
+#
+# Testcontainers provides the same PostgreSQL to the test suite, so there is exactly one
+# definition of "what this service needs to run" and it is checked in.
+#
+# Keycloak is NOT here yet. It arrives at step 2 of ADR-014's build order, together with
+# its realm as declarative YAML. Step 1 needs no identity provider at all: the anchor's
+# keycloak_sub is nullable, and common-test supplies a JwtDecoder stand-in so the real
+# security chain is exercised without one.
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: auth
+      POSTGRES_USER: auth
+      POSTGRES_PASSWORD: auth
+    ports:
+      # Not 5432, and not 55432 either.
+      #
+      # 5432 is avoided because plenty of machines already run a native PostgreSQL there,
+      # and the failure is nasty: the container starts, the app connects to the *other*
+      # database, and the error is a confusing "role does not exist" rather than
+      # "port in use".
+      #
+      # 55432 is the ledger's. Both services will be running on this laptop at the same
+      # time before long, and two Compose projects fighting over one host port is a
+      # thoroughly avoidable morning. Override with DB_HOST_PORT if 55433 is taken too.
+      - '${DB_HOST_PORT:-55433}:5432'
+    healthcheck:
+      # Boot waits for this before starting the application; without it the first
+      # connection attempt races the database's startup.
+      test: ['CMD-SHELL', 'pg_isready -U auth -d auth']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    tmpfs:
+      # Local data is disposable. Keeping it off disk makes restarts instant and stops a
+      # stale volume from outliving a migration change — which matters more than usual on
+      # a service whose first migration is still being reviewed.
+      #
+      # The mount is /var/lib/postgresql, not .../data: from PostgreSQL 18 the official
+      # image puts the cluster in a version-named subdirectory, and mounting the old path
+      # makes the container refuse to start.
+      - /var/lib/postgresql
