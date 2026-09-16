@@ -1,0 +1,67 @@
+# ---------------------------------------------------------------------------
+# The migration Job. Not a web application — this profile runs Flyway and exits.
+#
+# Activated as SPRING_PROFILES_ACTIVE=prod,migrate, in that order, so the Job
+# inherits production's hardening (ECS logging, log levels) and overrides only the
+# few things that differ. Profile order matters: later wins, so `migrate` beats
+# `prod`'s flyway.enabled=false. Reversing the two silently produces a Job that
+# starts, migrates nothing, and exits 0.
+#
+# It runs the SAME IMAGE as the Deployment, with different args and a different
+# Secret mounted. One artefact, so the Flyway version that migrates is by
+# construction the one the application was compiled against.
+#
+#   Argo sync wave 0   Job         DB_* from kv/wallet-auth/db-migrator   (DDL)
+#   Argo sync wave 1   Deployment  DB_* from kv/wallet-auth/db-app        (no DDL)
+#
+# The property names are identical in both. Which identity this process runs as is
+# decided by the pod spec, never by configuration in this repository.
+# ---------------------------------------------------------------------------
+spring:
+  main:
+    # No servlet container, no port, nothing to probe.
+    #
+    # This also switches OFF the entire security stack, and that is intended rather
+    # than incidental: backend-common's PlatformSecurityAutoConfiguration is
+    # @ConditionalOnWebApplication(SERVLET) and @Imports the resource-server, local
+    # and method-security configs. With no web application there is no
+    # SecurityFilterChain and no JwtDecoder — so the Job needs no OAUTH2_ISSUER_URI
+    # and does not depend on Keycloak being up to migrate a schema. A migration that
+    # could be blocked by an identity provider outage would be a poor design.
+    web-application-type: none
+    # Explicit, because it is the property that decides whether this Job ever
+    # finishes. With no web server and nothing keeping the context alive, main()
+    # returns, the shutdown hook closes the context and the JVM exits — exit 0 on
+    # success, non-zero if Flyway threw, which is exactly the contract a Job wants.
+    keep-alive: false
+    # A Job's logs are read when something went wrong. The banner is six lines of
+    # nothing at the top of that.
+    banner-mode: "off"
+
+  docker:
+    compose:
+      enabled: false
+
+  flyway:
+    # ON, overriding prod. This process exists for this line.
+    enabled: true
+
+  datasource:
+    hikari:
+      # The statement timeout is LIFTED here, and this is the reason the Job exists
+      # as a separate profile rather than a separate command.
+      #
+      # The application pool sets 3s so a runaway query cannot park a request thread.
+      # A migration is not a runaway query: an ALTER that rewrites a large table
+      # legitimately takes minutes, and killing it at 3s would leave the schema
+      # half-moved with a Flyway history row claiming failure. 0 disables the limit
+      # for this process only.
+      #
+      # The ledger has exactly this bug — one pool, one 1s timeout, shared with
+      # Flyway — and it has not bitten yet only because its migrations are small.
+      connection-init-sql: SET statement_timeout = 0
+      # Flyway takes one connection and an advisory lock. Ten would be nine idle
+      # connections held for the length of the migration, against a database that may
+      # be mid-deploy and short of slots.
+      maximum-pool-size: 2
+      minimum-idle: 0

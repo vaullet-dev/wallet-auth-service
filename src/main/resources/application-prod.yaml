@@ -1,0 +1,71 @@
+# ---------------------------------------------------------------------------
+# Deployed environments. Nothing here has a hard-coded value that differs between
+# staging and production — those come from the environment, and every credential
+# comes from OpenBao through External Secrets as a mounted Kubernetes Secret.
+#
+# The profile is set by the deployment (SPRING_PROFILES_ACTIVE=prod in the
+# Dockerfile, and in the pod spec). A `java -jar` with no profile at all still
+# gets the secure-by-default base configuration; this file only sharpens it.
+# ---------------------------------------------------------------------------
+spring:
+  docker:
+    compose:
+      enabled: false
+
+  flyway:
+    # OFF. This is the decision, and it is one line.
+    #
+    # Migrations run as a separate Kubernetes Job from the `migrate` profile,
+    # holding the migrator role, at an Argo sync wave before the Deployment. This
+    # process holds an app role with no DDL rights and never sees the migrator
+    # credential — so "the application cannot drop a table" is a property of what is
+    # mounted, not a promise in a document.
+    #
+    # The cost, stated so nobody rediscovers it during an incident: the schema is no
+    # longer guaranteed ready before the first request. The sync wave is what
+    # sequences them, and a rollback puts the previous image in front of a forward
+    # schema — which is survivable only while migrations stay backward-compatible.
+    # Expand-then-contract, never a destructive change in the same release as the
+    # code that stops needing the column.
+    enabled: false
+
+logging:
+  structured:
+    # One JSON object per line, in Elastic Common Schema. Boot ships this natively,
+    # so log shipping needs neither logstash-logback-encoder nor a hand-written
+    # logback-spring.xml. Fields are stable and greppable, and the trace id is a
+    # first-class key rather than a substring of a message.
+    format:
+      console: ecs
+  level:
+    root: INFO
+    # INFO, not the base file's ${LOG_LEVEL} default. Raising it here would be a
+    # deliberate act with a deliberate rollback; the env var still overrides for a
+    # single incident.
+    dev.vaullet.auth: INFO
+    # Explicitly NOT the JDBC loggers from the local profile. At TRACE those print
+    # bound parameter values — account ids and operator user references — into a log
+    # aggregator with a different retention policy and a different audience from the
+    # database. Named here so that turning them on in production is a decision
+    # somebody has to make against a comment, rather than a line someone copies.
+
+server:
+  tomcat:
+    # Sized against the database pool: threads that cannot get a connection are just
+    # a longer queue. With virtual threads enabled (platform defaults) this is the
+    # accept limit rather than a pool of platform threads.
+    threads:
+      max: 200
+    accesslog:
+      # The gateway already logs every request with more context than this service
+      # has. Two access logs for one request is storage spent on a duplicate.
+      enabled: false
+
+management:
+  endpoint:
+    health:
+      # Liveness and readiness stay public for the kubelet; the detail — which
+      # component is down, and its error — needs a principal. An unauthenticated
+      # health endpoint that names a failing datasource is a free reconnaissance
+      # endpoint.
+      show-details: when-authorized
