@@ -1,0 +1,71 @@
+# ---------------------------------------------------------------------------
+# The `test` profile, activated by backend-common's composed @IntegrationTest.
+#
+# Kept deliberately small. The closer the test configuration is to the deployed
+# configuration, the more the tests are worth — every override here is a way in
+# which a passing test proves slightly less than it appears to. So each one below
+# has a reason, and the reason is that Testcontainers, not Compose, owns the
+# infrastructure.
+# ---------------------------------------------------------------------------
+spring:
+  docker:
+    compose:
+      # Testcontainers owns the database in tests; Compose would be a second one,
+      # racing it for the same host port.
+      enabled: false
+
+  flyway:
+    # ON, as in the base file — a broken migration must fail the build rather than
+    # the deploy, and the tests then assert against the schema that will actually
+    # ship. On this service the migration carries two of the invariants
+    # (external_ref immutability, CLOSED being terminal), so AccountRepositoryIT is
+    # testing V1__identity.sql as much as it is testing any Java.
+    #
+    # Note this differs from prod, where the Job migrates. That difference is
+    # deliberate and worth being awake to: the test suite never exercises the
+    # `migrate` profile, so the Job's own configuration is covered by nothing here.
+    enabled: true
+
+  datasource:
+    hikari:
+      # NOT overridden away. The 3s statement_timeout from application.yaml applies
+      # in tests too, so a test that deadlocks fails in three seconds instead of
+      # hanging the build until someone notices CI has been red for an hour.
+      connection-init-sql: SET statement_timeout = '3s'
+
+management:
+  tracing:
+    sampling:
+      # Every test request traced, so an assertion on the trace_id in a problem+json
+      # body has something to assert against.
+      probability: 1.0
+
+logging:
+  level:
+    # Testcontainers and the Docker client are chatty at INFO and say nothing useful
+    # about a failing test.
+    org.testcontainers: WARN
+    com.github.dockerjava: WARN
+    # Kept OFF here even though the local profile turns it on. A failing assertion
+    # should be diagnosed from the assertion, and 200 lines of bound parameters per
+    # test makes a CI log unreadable. Turn it on locally for one run when needed.
+    #   org.springframework.jdbc.core.JdbcTemplate: DEBUG
+
+app:
+  environment: test
+
+vaullet:
+  api:
+    # Empty, matching a deployed environment. A test that passed only because CORS
+    # was open would be a test of the wrong thing.
+    allowed-origins: ""
+  test:
+    postgres:
+      # Pinned to the tag compose.yaml uses, so a behaviour that passes locally and
+      # fails in CI cannot be a version difference. The ledger has exactly this bug
+      # — LedgerRepositoryIT spins its own postgres:16-alpine while everything else
+      # is on 18 — and it is the kind that surfaces as an unreproducible flake.
+      #
+      # This is also the version docs/schema/ was generated against (18.6), so the
+      # catalog in that page describes the database the tests actually run on.
+      image: postgres:18-alpine
