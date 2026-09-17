@@ -18,9 +18,21 @@ This service owns **Vaullet's own record of a user** and brokers everything abou
 > stored twice.
 
 > [!IMPORTANT]
-> **Nothing here is implemented.** The repository is empty apart from this README and `docs/`. What
-> follows is the specification the code will be written against — read it as a design document, not
-> as a description of running software. Sections are marked where a decision is still open.
+> **Step 1 is implemented; steps 2–5 are not.** The account anchor — schema, repository, service and
+> `/v1/accounts` — is written and tested, which completes *federated* identity mode. Keycloak
+> integration, the identity facade and token exchange are not written, and nothing is deployed: the
+> cluster has no PostgreSQL and no Keycloak. Read [Build order](#build-order) for what exists.
+
+```
+./mvnw spring-boot:run     # PostgreSQL via Compose, Flyway migrates, serves on :8080
+./mvnw test                # 19 unit + architecture tests, no Docker          (~1s)
+./mvnw verify              # adds 26 integration tests on real PostgreSQL     (~5s)
+```
+
+Then open <http://localhost:8080/swagger-ui.html>.
+
+Resolving `dev.vaullet:common-*` needs a `github` server in `~/.m2/settings.xml` with a
+`read:packages` token — GitHub Packages requires authentication even for a public artifact.
 
 📐 **[Who Owns the User](https://vaullet-dev.github.io/wallet-auth-service/)** — the same material as
 a page, with the full component map, a worked account creation, and every field's owner. See
@@ -40,6 +52,7 @@ a page, with the full component map, a worked account creation, and every field'
 - […and the ledger's account row](#and-the-ledgers-account-row)
 - [The account status, and the freeze path](#the-account-status-and-the-freeze-path)
 - [Security](#security)
+- [Package structure](#package-structure)
 - [Build order](#build-order)
 - [Deliberate differences from the ledger](#deliberate-differences-from-the-ledger)
 - [Configuration and profiles](#configuration-and-profiles)
@@ -215,14 +228,16 @@ and a sub-resource puts the ownership boundary in the URL: the account is ours i
 identity only in local mode.
 
 ```
-POST   /v1/accounts                        → 201 {account_id, status, external_ref, …}
-                                           | 409 EXTERNAL_REF_TAKEN | 409 IDENTITY_ALREADY_LINKED
+── implemented ─────────────────────────────────────────────────────────────
+POST   /v1/accounts        {external_ref}  → 201 {account_id, status, external_ref, linked, …}
+                                           | 400 VALIDATION_FAILED | 409 EXTERNAL_REF_TAKEN
+                                           | 409 ACCOUNT_CLOSED
 GET    /v1/accounts/{id}                   → 200 (same representation) | 404
 GET    /v1/accounts/by-ref/{external_ref}  → 200 | 404
-PATCH  /v1/accounts/{id}                   → 200  status: ACTIVE | SUSPENDED | CLOSED
+PATCH  /v1/accounts/{id}   {status}        → 200  ACTIVE | SUSPENDED | CLOSED
                                            | 409 ACCOUNT_CLOSED | 404
 
-                                           ── local identity mode only ──
+── step 4, local identity mode only ────────────────────────────────────────
 GET    /v1/accounts/{id}/identity          → 200  from Keycloak, live
 PATCH  /v1/accounts/{id}/identity          → 200  to Keycloak
 POST   /v1/accounts/{id}/password-reset    → 202  Keycloak sends the mail
@@ -236,8 +251,14 @@ Under `auth.provider: federated` the local-only endpoints return `404 ENDPOINT_N
 `GET /v1/capabilities` reports `user_management: false` — the mechanism ADR-012 §4 already defines
 for module-gated resources, reused for a mode-gated one.
 
-**`POST /v1/accounts` requires at least one of `external_ref` or `keycloak_sub`**, and needs no
-`Idempotency-Key` because of it. Creating an account writes to Keycloak *and* to this database with
+**`POST /v1/accounts` takes one field, `external_ref`**, and needs no `Idempotency-Key` because of
+it. It deliberately accepts no `keycloak_sub`: no HTTP caller is in a position to know one — in local
+mode this service mints the realm user itself (step 4), and in federated mode just-in-time
+provisioning supplies it (step 2). The column is nullable for that listener, not for the API.
+
+**The response omits the Keycloak subject too**, reporting `linked: true|false` instead. ADR-006's
+central property is that downstream keys on `account_id` and never on `sub`; handing the subject to an
+operator invites exactly the coupling the anchor exists to prevent. Creating an account writes to Keycloak *and* to this database with
 no transaction spanning the two, so the retry path **is** the recovery path — but the account's own
 natural keys make a retry recognisable without a separate one. See
 [Idempotency without an idempotency key](#idempotency-without-an-idempotency-key) for why this is the
@@ -290,27 +311,39 @@ lookup nobody granted them.
 key crosses between them.** `keycloak_sub` is a plain `UUID` on purpose: a Keycloak major upgrade
 migrates its own tables, and a reference from here would make that upgrade our problem.
 
+**[`docs/schema/`](docs/schema/) is the authoritative description**, generated from a real database:
+a throwaway PostgreSQL migrated by Flyway, then the page written from `pg_catalog`. It therefore
+shows what the database *ended up with* — the indexes `UNIQUE` created, the form PostgreSQL rewrote
+each `CHECK` into, the trigger timing — rather than what the DDL appears to say. The migration itself
+is [`V1__identity.sql`](src/main/resources/db/migration/V1__identity.sql).
+
 ```sql
 CREATE TABLE accounts (
-    account_id   UUID PRIMARY KEY,
+    account_id   UUID        NOT NULL,
     keycloak_sub UUID        NULL,        -- null = unlinked anchor; set at first authentication
     external_ref TEXT        NULL,        -- operator's own user id; immutable once set
-    status       TEXT        NOT NULL CHECK (status IN ('ACTIVE','SUSPENDED','CLOSED')),
+    status       TEXT        NOT NULL,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
 
+    CONSTRAINT accounts_pk              PRIMARY KEY (account_id),
     CONSTRAINT accounts_keycloak_sub_uk UNIQUE (keycloak_sub),
     CONSTRAINT accounts_external_ref_uk UNIQUE (external_ref),
+    CONSTRAINT accounts_status_ck       CHECK (status IN ('ACTIVE','SUSPENDED','CLOSED')),
 
     -- Every account must be addressable by something other than the id we just minted.
-    -- This is what makes creation idempotent without an idempotency column — see below.
-    CONSTRAINT accounts_has_a_natural_key
-        CHECK (external_ref IS NOT NULL OR keycloak_sub IS NOT NULL)
+    -- This is what makes creation retry-safe without an idempotency column — see below.
+    CONSTRAINT accounts_natural_key_ck
+        CHECK (external_ref IS NOT NULL OR keycloak_sub IS NOT NULL),
+
+    -- An empty string is not a missing value. Allowing both gives two spellings of "no operator
+    -- reference", one of which silently defeats the constraint above.
+    CONSTRAINT accounts_external_ref_not_blank_ck
+        CHECK (external_ref IS NULL OR length(btrim(external_ref)) > 0)
 );
 ```
 
-Exactly ADR-014 §5, plus one `CHECK`. There is no idempotency column: the two natural keys already
-carry it.
+ADR-014 §5, plus two `CHECK`s. **There is no idempotency column**: the natural keys already carry it.
 
 Every column, and why:
 
@@ -545,8 +578,8 @@ ADR-014's order, because each step is independently useful and the first one unb
 
 | # | Step | What it delivers | State |
 | --- | --- | --- | --- |
-| 1 | **The anchor** — migration, DAO, `POST`/`GET /v1/accounts`, `by-ref`, `PATCH` status | **Federated mode is complete here**, and the ledger finally gains a creator for the account row nothing currently creates | ⬜ next |
-| 2 | Token validation, the `account_id` protocol mapper, JIT provisioning | Tokens carry `account_id`; the unlinked anchor gets linked | ⬜ |
+| 1 | **The anchor** — migration, DAO, service, `POST`/`GET /v1/accounts`, `by-ref`, `PATCH` status | **Federated mode is complete here.** 25 main sources, 45 tests | ✅ **done** 2026-09-17 |
+| 2 | Token validation, the `account_id` protocol mapper, JIT provisioning, and the `identity.account-created.v1` producer | Tokens carry `account_id`; the unlinked anchor gets linked; the ledger gains its `account_balances` row | ⬜ **next** |
 | 3 | Status enforcement and the Redis-cached gateway check | The freeze takes effect | ⬜ |
 | 4 | The Keycloak admin client and the identity sub-resources | Local mode's user management — the facade | ⬜ |
 | 5 | `api_clients` and token exchange (RFC 8693) | Operator server-to-server integration | ⬜ |
@@ -561,6 +594,45 @@ part this service is named after.
 - **Bulk import.** A local-mode operator migrating from an existing system needs it and will drive a
   per-user REST loop until it is designed.
 - **End users editing their own profile.** That is Keycloak's account console, not our API.
+
+---
+
+## Package structure
+
+```
+dev.vaullet.auth
+├── AuthApplication.java              entry point: @SpringBootApplication and nothing else
+├── package-info.java                 @NullMarked
+│
+├── common/error/                     this service's share of the error vocabulary
+│   ├── AuthErrorType.java            EXTERNAL_REF_TAKEN, IDENTITY_ALREADY_LINKED, ACCOUNT_CLOSED
+│   ├── AuthApiExceptionHandler.java  the shared advice, plus one DuplicateKeyException backstop
+│   └── exception/                    the concrete throwables
+│
+└── account/                          ← the feature slice
+    ├── api/v1/                       controller + dto/ — versioned, because ADR-011 §4 runs v1 and
+    │                                 v2 side by side for twelve months
+    ├── service/                      AccountService, Account, AccountStatus, NewAccount,
+    │                                 validation/ — rules, transactions, authorisation
+    └── dao/                          AccountRepository + AccountStatements — every statement
+```
+
+**The SQL is not in the Java.** `db/sql/accounts/*.sql` holds the five statements, loaded eagerly at
+startup by `AccountStatements` so a renamed file fails the context rather than an endpoint. The
+reasoning for each one lives in the file with it, which is also where it is useful: SQL comments reach
+the server, so a statement misbehaving in `pg_stat_activity` names its own source file.
+
+**Only the API layer is versioned.** ADR-011 versions the wire, not the domain, and the separate DTO
+types are what let the two move independently. A `/v2` needing its own `AccountService` would mean the
+version boundary was drawn in the wrong place.
+
+**Every package carries its own `package-info.java`** with `@NullMarked`. Java packages do not nest
+for annotation purposes — `spring-core` ships fifty of these files for the same reason — so the
+declaration at the root reaches only `AuthApplication`.
+
+**No records.** Classes throughout: `AccountRow`, `Account`, `NewAccount` and the DTOs. `Account`'s
+`equals` is identity-only — the same account with a changed status is still the same account — which
+value-equality across all six fields would have got wrong.
 
 ---
 
