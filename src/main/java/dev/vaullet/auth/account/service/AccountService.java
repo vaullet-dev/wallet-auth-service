@@ -7,6 +7,7 @@ import dev.vaullet.auth.common.error.exception.IdentityAlreadyLinkedException;
 import dev.vaullet.common.error.ResourceNotFoundException;
 import jakarta.validation.Valid;
 import java.util.Optional;
+import java.util.function.Supplier;
 import java.util.UUID;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
@@ -77,29 +78,24 @@ public class AccountService {
     @Transactional
     @PreAuthorize("hasAuthority('SCOPE_identity:admin') and hasRole('SUPER_ADMIN')")
     public Account create(@Valid NewAccount command) {
-        return findByNaturalKey(command)
-                .map(existing -> replay(existing, command))
-                .orElseGet(() -> insert(command));
-    }
-
-    /**
-     * The account this request would already have created, if it ran before.
-     *
-     * <p>At most one row can match: both keys are unique, and a command that matched two different
-     * accounts on its two keys would need each of them to hold one key and not the other — which the
-     * reconciliation below then refuses. Checking the operator's reference first is arbitrary and
-     * safe for that reason.
-     */
-    private Optional<Account> findByNaturalKey(NewAccount command) {
         Optional<Account> byRef = command.getExternalRef()
                 .flatMap(accounts::findByExternalRef)
                 .map(AccountService::toDomain);
         if (byRef.isPresent()) {
-            return byRef;
+            return replay(byRef.get(), command,
+                    () -> new ExternalRefTakenException(command.getExternalRef().orElseThrow()));
         }
-        return command.getKeycloakSub()
+
+        Optional<Account> bySub = command.getKeycloakSub()
                 .flatMap(accounts::findByKeycloakSub)
                 .map(AccountService::toDomain);
+
+        if (bySub.isPresent()) {
+            return replay(bySub.get(), command,
+                    () -> new IdentityAlreadyLinkedException(command.getKeycloakSub().orElseThrow()));
+        }
+
+        return insert(command);
     }
 
     private Account insert(NewAccount command) {
@@ -115,16 +111,23 @@ public class AccountService {
      * colliding with it.
      *
      * <p>It is a repeat unless the command <em>asserts</em> something the stored account does not
-     * say. Each contradiction gets the code that names which side collided, so an integrator can
-     * tell "your identifier is mapped elsewhere" from "that identity already has an account" —
-     * different problems with different fixes, only one of which is anybody's mistake.
+     * say. If anything does contradict, the conflict is reported against <b>the key that found the
+     * account</b> — which is the one the caller is colliding on, and the only one that makes the
+     * message true.
+     *
+     * <p>That distinction is worth the parameter, because getting it backwards produces error bodies
+     * that are confidently wrong: reporting {@code IDENTITY_ALREADY_LINKED} when the matched account
+     * was found by reference names a subject that may be linked to nothing at all. An earlier version
+     * of this method chose the code from <em>which field differed</em> rather than which one matched,
+     * and did exactly that. {@code AccountServiceTest} is what caught it.
+     *
+     * @param onCollision the conflict for the key that matched
      */
-    private static Account replay(Account existing, NewAccount command) {
-        if (contradicts(command.getExternalRef(), existing.getExternalRef())) {
-            throw new ExternalRefTakenException(command.getExternalRef().orElseThrow());
-        }
-        if (contradicts(command.getKeycloakSub(), existing.getKeycloakSub())) {
-            throw new IdentityAlreadyLinkedException(command.getKeycloakSub().orElseThrow());
+    private static Account replay(
+            Account existing, NewAccount command, Supplier<RuntimeException> onCollision) {
+        if (contradicts(command.getExternalRef(), existing.getExternalRef())
+                || contradicts(command.getKeycloakSub(), existing.getKeycloakSub())) {
+            throw onCollision.get();
         }
         // Handing a closed account back with a 201 would tell the caller it is ready to use. Closure
         // is terminal, so this is permanent rather than a state they can wait out.
@@ -140,12 +143,12 @@ public class AccountService {
      * <p><b>Absent is not a contradiction.</b> Omitting a field is not the same as changing it, so a
      * caller who sends less on a retry than they sent originally still gets their account back.
      *
-     * <p>A stored {@code empty} against a requested value <em>is</em> counted as a contradiction,
-     * and that is the one debatable line in this method. It means "attach an identity to an existing
-     * unlinked anchor", which is a real operation — just not this one. It belongs to step 2's
-     * just-in-time provisioning, which will link the row properly instead of refusing. Until then
-     * the API cannot reach this case anyway: {@code CreateAccountRequest} carries no
-     * {@code keycloak_sub}, because no HTTP caller is in a position to know one.
+     * <p>A stored {@code empty} against a requested value <em>is</em> counted as a contradiction, and
+     * that is the one debatable line here. It means "attach an identity to an existing unlinked
+     * anchor", which is a real operation — just not this one. It belongs to step 2's just-in-time
+     * provisioning, which will link the row rather than refuse. Until then the API cannot reach the
+     * case anyway: {@code CreateAccountRequest} carries no {@code keycloak_sub}, because no HTTP
+     * caller is in a position to know one.
      */
     private static <T> boolean contradicts(Optional<T> requested, Optional<T> stored) {
         return requested.isPresent() && !requested.equals(stored);
