@@ -64,7 +64,7 @@ public class AccountRepository {
         private final Instant createdAt;
         private final Instant updatedAt;
 
-        AccountRow(
+        public AccountRow(
                 UUID accountId,
                 @Nullable UUID keycloakSub,
                 @Nullable String externalRef,
