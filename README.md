@@ -715,6 +715,11 @@ publishes notes — which is why `backend-common`'s CHANGELOG still files everyt
 *Unreleased* while 0.1.0 and 0.1.1 sit in GHCR. This repository is where the replacement is being
 proved before the other two migrate.
 
+**Use `npm ci`, not `npm install`, when checking the tooling.** `npm install` will resolve a
+dependency graph it cannot fully describe and report success; `npm ci` refuses the same graph. That is
+not a quirk to work around — it is the check. `conventional-changelog-conventionalcommits` is pinned to
+`^8` for exactly this reason, explained in `release.config.mjs`.
+
 Locally: `npm ci` then `npm run release:dry`. It needs push credentials even in dry-run, so it only
 runs properly in CI; `npx commitlint --from HEAD~1` checks a message without any credentials at all.
 

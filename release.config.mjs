@@ -28,6 +28,16 @@ export default {
   /** `v1.2.3`, matching the ledger's tags so `git describe` output reads the same across repos. */
   tagFormat: "v${version}",
 
+  /**
+   * A note on `conventional-changelog-conventionalcommits`, pinned to **^8** in package.json.
+   *
+   * Version 10 exists and npm will happily install it, but it belongs to a newer
+   * conventional-changelog line that pulls `@conventional-changelog/git-client`, which requires
+   * `conventional-commits-filter@^6`. Every `@semantic-release/*` plugin in semantic-release 24 wants
+   * `^5`. `npm install` resolves that contradiction into a tree it cannot describe, and then **`npm ci`
+   * refuses to install it** — which is how CI found it, after `npm install` had reported success
+   * locally. Bumping this to 10 needs semantic-release 25 or later.
+   */
   plugins: [
     /**
      * Three commit types, three levels — plus the aliases this project already writes.
