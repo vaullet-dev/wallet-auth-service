@@ -1,0 +1,147 @@
+# Build, test, release. The version is never decided here — semantic-release reads it out of the
+# commit log (release.config.mjs), which is why there is no version step in this file and no
+# scripts/version.sh in this repository.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Cancel superseded PR builds; never cancel a release half-way through pushing an image.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+permissions:
+  contents: read
+  # Read-only here, and only so Maven can resolve dev.vaullet:common-* from GHCR Maven.
+  packages: read
+
+jobs:
+  # The commit log is the version number, so an unparseable message is a build error rather than a
+  # style complaint. Catching it on the pull request is the only place it is still cheap to fix.
+  commits:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Lint the commits in this pull request
+        run: npx commitlint --from "${{ github.event.pull_request.base.sha }}" --to "${{ github.event.pull_request.head.sha }}" --verbose
+
+      # Squash-merging a pull request uses its TITLE as the commit subject, so a tidy branch with a
+      # sloppy title still produces a message semantic-release cannot classify.
+      - name: Lint the pull request title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: echo "$PR_TITLE" | npx commitlint --verbose
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: maven
+          # dev.vaullet:common-* lives in GitHub Packages, which requires authentication even for a
+          # public artifact.
+          server-id: github
+          server-username: GITHUB_ACTOR
+          server-password: GITHUB_TOKEN
+
+      # Docker is present on the runner, so the integration tests get a real PostgreSQL through
+      # Testcontainers — the same container definition compose.yaml uses.
+      - name: Build and test
+        run: ./mvnw -B --no-transfer-progress verify
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish the test report
+        if: always()
+        uses: mikepenz/action-junit-report@v4
+        with:
+          report_paths: '**/target/*-reports/TEST-*.xml'
+          check_name: tests
+        # Needs checks: write, granted on this job only.
+        continue-on-error: true
+
+      - name: Keep the reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: '**/target/*-reports/'
+          retention-days: 7
+
+  release:
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      # The tag, the CHANGELOG commit and the GitHub release.
+      contents: write
+      # Reading dev.vaullet:common-* AND pushing the image.
+      packages: write
+      # @semantic-release/github resolves the pull requests behind each commit.
+      issues: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # semantic-release reads every tag and the whole log since the last one. A shallow clone
+          # makes it believe nothing has ever been released and start again at 1.0.0.
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: maven
+          server-id: github
+          server-username: GITHUB_ACTOR
+          server-password: GITHUB_TOKEN
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # One command. semantic-release decides whether there is anything to release, builds and
+      # pushes the image from its prepare step, writes CHANGELOG.md, commits it, tags, and publishes
+      # the release notes. A run with only chore/docs/test/ci commits exits cleanly having done
+      # nothing, which is the correct outcome and not a failure.
+      - name: Release
+        run: npx semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The runner is x86_64, which is what the cluster runs, so the POM's imagePlatform costs
+          # nothing here — unlike on an arm64 laptop, where it is the difference between an image
+          # that runs and one that dies with an exec-format error.
+          IMAGE_OWNER: ${{ github.repository_owner }}
+          GITHUB_ACTOR: ${{ github.actor }}

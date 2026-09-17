@@ -9,3 +9,9 @@ target/
 
 # The published documentation page. 40 KB of HTML that the build has no use for.
 docs/
+node_modules/
+package.json
+package-lock.json
+release.config.mjs
+commitlint.config.mjs
+CHANGELOG.md

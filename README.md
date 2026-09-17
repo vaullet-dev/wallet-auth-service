@@ -55,6 +55,7 @@ a page, with the full component map, a worked account creation, and every field'
 - [Package structure](#package-structure)
 - [Build order](#build-order)
 - [Deliberate differences from the ledger](#deliberate-differences-from-the-ledger)
+- [Releases](#releases)
 - [Configuration and profiles](#configuration-and-profiles)
 - [Decided, and what each one still needs](#decided-and-what-each-one-still-needs)
 - [Rendering the diagrams](#rendering-the-diagrams)
@@ -678,6 +679,44 @@ The simplest way to keep that true is not to publish one.
 **5. `RESOURCE_BUSY`, not a renamed local code.** The ledger overrides `lockContentionErrorType()`
 because `ACCOUNT_BUSY` was published before `RESOURCE_BUSY` existed. This service has no such
 history, so it inherits the platform code and a reader has one less local exception to learn.
+
+---
+
+## Releases
+
+There is **no version number committed anywhere** in this repository, and `master` never carries a
+`-SNAPSHOT`. Both follow from one decision: a version is a statement about what changed, and the only
+record of what changed is the commit log. Deriving the number from the log means it cannot disagree
+with the code, and there is no "bump the version" commit to forget or to conflict.
+
+[semantic-release](https://semantic-release.gitbook.io) does the deriving, on every push to `master`:
+
+| | |
+| --- | --- |
+| `feat:` · `feature:` | MINOR — something new, everything that worked still works |
+| `fix:` · `patch:` · `perf:` · `refactor:` · `deps:` | PATCH |
+| `feat!:` · `breaking:` · a `BREAKING CHANGE:` footer | MAJOR |
+| `chore:` · `docs:` · `test:` · `ci:` · `style:` | no release |
+
+One run does all of it: computes the number, builds and pushes `ghcr.io/vaullet-dev/auth-service:X.Y.Z`,
+writes `CHANGELOG.md`, commits it, tags `vX.Y.Z`, and publishes the release notes. A push carrying
+only `chore`/`docs`/`test` commits exits cleanly having done nothing, which is correct rather than a
+failure.
+
+**The image is pushed in `prepare`, before the tag is written.** semantic-release tags between
+`prepare` and `publish`, so pushing from a publish step would tag a commit whose image may not exist —
+and the next run would compute the following version from that tag, silently skipping the gap. The
+ledger's hand-written workflow argues for this ordering in a comment and achieves it by putting the
+tag step last; here it falls out of where the plugin sits.
+
+**This replaces `scripts/version.sh`**, which the ledger and `backend-common` still use. That script
+answers "what number is this build" correctly but never creates the tag, writes a changelog entry or
+publishes notes — which is why `backend-common`'s CHANGELOG still files everything under
+*Unreleased* while 0.1.0 and 0.1.1 sit in GHCR. This repository is where the replacement is being
+proved before the other two migrate.
+
+Locally: `npm ci` then `npm run release:dry`. It needs push credentials even in dry-run, so it only
+runs properly in CI; `npx commitlint --from HEAD~1` checks a message without any credentials at all.
 
 ---
 
