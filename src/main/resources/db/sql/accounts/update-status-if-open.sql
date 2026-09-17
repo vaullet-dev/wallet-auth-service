@@ -12,7 +12,7 @@
 --
 -- Setting the same status again matches and is a no-op plus a touched updated_at, so a
 -- retried request succeeds rather than erroring.
-UPDATE accounts
+UPDATE identity_schema.accounts
    SET status = ?,
        updated_at = now()
  WHERE account_id = ?
