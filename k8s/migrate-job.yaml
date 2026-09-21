@@ -21,6 +21,12 @@ spec:
   template:
     spec:
       restartPolicy: Never
+      volumes:
+        # The image is a Paketo buildpack build (spring-boot:build-image), not the
+        # Dockerfile in this repo -- that file is for local use only. The JVM needs
+        # a writable /tmp, so readOnlyRootFilesystem below requires this.
+        - name: tmp
+          emptyDir: {}
       containers:
         - name: migrate
           # Rewritten by kustomize from the images: block below, which CI updates
@@ -33,6 +39,15 @@ spec:
             # and exits 0 -- a silent no-op that looks like success.
             - name: SPRING_PROFILES_ACTIVE
               value: prod,migrate
+            # Paketo sizes the heap from the container limit by SUBTRACTING a fixed
+            # 240M code cache, ~100M metaspace and thread_count x 1M of stacks. Its
+            # default of 250 threads is sized for a web application; this Job serves
+            # nothing, and at 250 the arithmetic leaves so little heap that the
+            # calculator fails outright rather than starting small.
+            #
+            # Measured on this cluster: 1Gi with 50 threads yields -Xmx640471K.
+            - name: BPL_JVM_THREAD_COUNT
+              value: "50"
             - name: APP_ENVIRONMENT
               value: prod
             # platform-rw always points at the current primary of the `platform`
@@ -46,11 +61,15 @@ spec:
               valueFrom: { secretKeyRef: { name: db-migrator, key: DB_PASSWORD } }
           resources:
             requests: { cpu: 100m, memory: 256Mi }
-            limits:   { memory: 768Mi }
+            # 1Gi, not less: see BPL_JVM_THREAD_COUNT above. Below roughly 600Mi the
+            # Paketo memory calculator refuses to produce a configuration at all.
+            limits:   { memory: 1Gi }
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities: { drop: [ ALL ] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
       securityContext:
         runAsNonRoot: true          # the image's own `app` user; no UID hardcoded here
         seccompProfile: { type: RuntimeDefault }
