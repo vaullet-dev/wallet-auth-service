@@ -6,6 +6,8 @@ resources:
   - k8s/externalsecret-db-migrator.yaml
   - k8s/externalsecret-db-app.yaml
   - k8s/migrate-job.yaml
+  - k8s/deployment.yaml
+  - k8s/service.yaml
 
 # CI rewrites newTag on every release. This one line IS the deployment: Argo CD
 # reconciles the cluster to whatever tag is committed here.

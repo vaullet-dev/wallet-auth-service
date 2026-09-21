@@ -1,0 +1,90 @@
+# The running service. Holds auth_app, which V2 granted SELECT/INSERT/UPDATE on
+# one table and nothing else -- no DDL, not even DELETE. The migration Job holds
+# a different role; neither process can do the other's job.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+  labels: { app: auth-service }
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels: { app: auth-service }
+  template:
+    metadata:
+      labels: { app: auth-service }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      volumes:
+        # The published image is a Paketo buildpack build, and the JVM needs a
+        # writable /tmp -- without this, readOnlyRootFilesystem below stops it
+        # starting.
+        - name: tmp
+          emptyDir: {}
+      containers:
+        - name: auth-service
+          image: ghcr.io/vaullet-dev/auth-service
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8080 }
+          env:
+            - { name: SPRING_PROFILES_ACTIVE, value: prod }
+            - { name: APP_ENVIRONMENT,        value: prod }
+
+            # Paketo derives the heap by SUBTRACTING a fixed code cache, metaspace
+            # and thread_count x 1M from the container limit. 200 matches
+            # server.tomcat.threads.max in application-prod.yaml, so the accounting
+            # reflects what actually runs.
+            - { name: BPL_JVM_THREAD_COUNT,   value: "200" }
+
+            # platform-rw always points at the current primary. currentSchema
+            # rather than a later search_path: ADR-003 puts keycloak_schema in this
+            # same database, and it is emphatically not ours -- Keycloak's 100
+            # tables live one schema away.
+            - name: DB_URL
+              value: jdbc:postgresql://platform-rw.postgres.svc:5432/auth_db?currentSchema=identity_schema
+            - name: DB_USERNAME
+              valueFrom: { secretKeyRef: { name: db-app, key: DB_USERNAME } }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: db-app, key: DB_PASSWORD } }
+
+            # No default in application.yaml, deliberately: unset means no
+            # JwtDecoder and the context refuses to start rather than serving
+            # unauthenticated. Verified 2026-09-21 to mint RS256 tokens carrying
+            # realm_access.roles.
+            - name: OAUTH2_ISSUER_URI
+              value: https://auth.vaullet.dev/realms/vaullet
+
+          # Liveness and readiness are separate endpoints for a reason: readiness
+          # fails while the database is unreachable so traffic stops, but liveness
+          # keeps passing so the kubelet does not restart a healthy JVM over an
+          # outage it cannot fix by restarting.
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 4
+          startupProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            periodSeconds: 5
+            failureThreshold: 30      # up to 150s for a cold JVM
+
+          resources:
+            requests: { cpu: 200m, memory: 512Mi }
+            limits:   { memory: 1536Mi }
+
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ ALL ] }
