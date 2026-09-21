@@ -11,8 +11,24 @@
 -- managed.roles): the database and the roles are the platform's, the schema and
 -- everything in it are the service's.
 --
--- If auth_app does not exist this fails, and that is correct. A conditional skip
--- would leave a service that starts, connects, and 42501s on every request.
+-- The role must EXIST for these grants to parse, and it does not exist
+-- everywhere. In a cluster CloudNativePG creates it from managed.roles, with a
+-- password from OpenBao. In a Testcontainers PostgreSQL there is no platform at
+-- all, so the first draft of this file failed CI with
+--     ERROR: role "auth_app" does not exist
+--
+-- So: ensure it, without owning it. NOLOGIN and no password, because the
+-- credential is emphatically the platform's business -- a migration that could
+-- set a login password would be a migration that could grant itself access.
+-- Where the platform already made the role, this is a no-op and its LOGIN and
+-- password are left exactly as they are.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'auth_app') THEN
+        CREATE ROLE auth_app NOLOGIN;
+    END IF;
+END
+$$;
 
 GRANT USAGE ON SCHEMA identity_schema TO auth_app;
 
@@ -28,10 +44,17 @@ GRANT USAGE ON SCHEMA identity_schema TO auth_app;
 GRANT SELECT, INSERT, UPDATE ON identity_schema.accounts TO auth_app;
 
 -- Tables a LATER migration creates get the same treatment without anyone
--- remembering to add a grant. Scoped to auth_migrator because that is who will
--- create them.
-ALTER DEFAULT PRIVILEGES FOR ROLE auth_migrator IN SCHEMA identity_schema
+-- remembering to add a grant.
+--
+-- No FOR ROLE clause, deliberately. Default privileges attach to the role that
+-- CREATES the object, and that role is whoever is running this migration --
+-- auth_migrator in a cluster, the container's own user under Testcontainers.
+-- Naming auth_migrator explicitly was the first draft and it failed with
+--     ERROR: role "auth_migrator" does not exist
+-- in any environment the platform did not build. Omitting it means CURRENT_USER,
+-- which is the correct answer in both.
+ALTER DEFAULT PRIVILEGES IN SCHEMA identity_schema
     GRANT SELECT, INSERT, UPDATE ON TABLES TO auth_app;
 
-ALTER DEFAULT PRIVILEGES FOR ROLE auth_migrator IN SCHEMA identity_schema
+ALTER DEFAULT PRIVILEGES IN SCHEMA identity_schema
     GRANT USAGE, SELECT ON SEQUENCES TO auth_app;
