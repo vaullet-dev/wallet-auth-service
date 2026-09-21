@@ -1,3 +1,10 @@
+## [0.3.0](https://github.com/vaullet-dev/wallet-auth-service/compare/v0.2.1...v0.3.0) (2026-09-21)
+
+### Features
+
+* app role grants and its credential ([0c75437](https://github.com/vaullet-dev/wallet-auth-service/commit/0c7543721bc7d95bfa7d61ac50400cd95c1c042c))
+* app role grants and its credential ([080217d](https://github.com/vaullet-dev/wallet-auth-service/commit/080217d54de273801240efcf0436bd857e824490))
+
 ## [0.2.1](https://github.com/vaullet-dev/wallet-auth-service/compare/v0.2.0...v0.2.1) (2026-09-21)
 
 ### Fixes
