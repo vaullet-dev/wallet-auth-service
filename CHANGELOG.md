@@ -1,3 +1,9 @@
+## [0.2.0](https://github.com/vaullet-dev/wallet-auth-service/compare/v0.1.0...v0.2.0) (2026-09-21)
+
+### Features
+
+* kubernetes manifests for the migration job ([58e2256](https://github.com/vaullet-dev/wallet-auth-service/commit/58e2256d41093d5910dc3514d1f5968b1403f89e))
+
 # Changelog
 
 Written by [semantic-release](https://semantic-release.gitbook.io) from the commit log, and committed
