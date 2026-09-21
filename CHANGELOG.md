@@ -1,3 +1,9 @@
+## [0.2.1](https://github.com/vaullet-dev/wallet-auth-service/compare/v0.2.0...v0.2.1) (2026-09-21)
+
+### Fixes
+
+* pin the published image tag and size the job ([91bce8e](https://github.com/vaullet-dev/wallet-auth-service/commit/91bce8e315de007b20f71426e958dcfa0fb875be))
+
 ## [0.2.0](https://github.com/vaullet-dev/wallet-auth-service/compare/v0.1.0...v0.2.0) (2026-09-21)
 
 ### Features
