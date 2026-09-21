@@ -4,6 +4,7 @@ namespace: wallet-auth
 resources:
   - k8s/serviceaccount.yaml
   - k8s/externalsecret-db-migrator.yaml
+  - k8s/externalsecret-db-app.yaml
   - k8s/migrate-job.yaml
 
 # CI rewrites newTag on every release. This one line IS the deployment: Argo CD
