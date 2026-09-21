@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: wallet-auth
+resources:
+  - k8s/serviceaccount.yaml
+  - k8s/externalsecret-db-migrator.yaml
+  - k8s/migrate-job.yaml
+
+# CI rewrites newTag on every release. This one line IS the deployment: Argo CD
+# reconciles the cluster to whatever tag is committed here.
+#
+# No Deployment, Service or HTTPRoute yet, and that is deliberate rather than
+# unfinished. application.yaml declares the JWT issuer with no default, so an
+# unset OAUTH2_ISSUER_URI means no JwtDecoder and the context refuses to start
+# rather than serving unauthenticated. Keycloak is not deployed; until it is,
+# this repository ships the migration and nothing that listens on a port.
+images:
+  - name: ghcr.io/vaullet-dev/auth-service
+    newTag: "0.1.0"

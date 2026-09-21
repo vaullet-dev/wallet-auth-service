@@ -1,0 +1,56 @@
+# Flyway, as a Job, holding the migrator role. Not the application: in a
+# deployed environment application-prod.yaml sets spring.flyway.enabled=false,
+# so the running service never has DDL rights and never sees this credential.
+#
+# An Argo SYNC HOOK rather than a plain Job in a sync wave. A Job's spec is
+# immutable, so a plain Job cannot be updated when the image tag changes -- Argo
+# would try, the API would refuse, and the sync would fail on every release.
+# BeforeHookCreation deletes the previous Job and creates a new one each sync,
+# which is what "run the migrations for this version" actually means.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: auth-migrate
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 2
+  # A migration that hangs holds an advisory lock. Fail loudly instead.
+  activeDeadlineSeconds: 900
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          # Rewritten by kustomize from the images: block below, which CI updates
+          # on release. ADR-010 §4: never a mutable tag.
+          image: ghcr.io/vaullet-dev/auth-service
+          imagePullPolicy: IfNotPresent
+          env:
+            # Order matters: later wins, so `migrate` beats prod's
+            # flyway.enabled=false. Reversed, this Job starts, migrates nothing
+            # and exits 0 -- a silent no-op that looks like success.
+            - name: SPRING_PROFILES_ACTIVE
+              value: prod,migrate
+            - name: APP_ENVIRONMENT
+              value: prod
+            # platform-rw always points at the current primary of the `platform`
+            # CloudNativePG cluster. currentSchema, not a later search_path: ADR-003
+            # puts keycloak_schema in this same database and it is not ours.
+            - name: DB_URL
+              value: jdbc:postgresql://platform-rw.postgres.svc:5432/auth_db?currentSchema=identity_schema
+            - name: DB_USERNAME
+              valueFrom: { secretKeyRef: { name: db-migrator, key: DB_USERNAME } }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: db-migrator, key: DB_PASSWORD } }
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits:   { memory: 768Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ ALL ] }
+      securityContext:
+        runAsNonRoot: true          # the image's own `app` user; no UID hardcoded here
+        seccompProfile: { type: RuntimeDefault }
