@@ -53,10 +53,12 @@ spec:
 
             # No default in application.yaml, deliberately: unset means no
             # JwtDecoder and the context refuses to start rather than serving
-            # unauthenticated. Verified 2026-09-21 to mint RS256 tokens carrying
-            # realm_access.roles.
+            # unauthenticated. Must equal Keycloak's issuer character for
+            # character -- it is compared against every token's `iss`. Keycloak
+            # is served under vaullet.dev/auth (gitops: keycloak.yaml, KC_HOSTNAME
+            # and http.relativePath).
             - name: OAUTH2_ISSUER_URI
-              value: https://auth.vaullet.dev/realms/vaullet
+              value: https://vaullet.dev/auth/realms/vaullet
 
           # Liveness and readiness are separate endpoints for a reason: readiness
           # fails while the database is unreachable so traffic stops, but liveness
