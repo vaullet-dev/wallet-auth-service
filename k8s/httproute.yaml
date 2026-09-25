@@ -1,0 +1,47 @@
+# vaullet.dev/api/auth -> auth-service. The backend is routed by PATH on the one
+# public hostname: each service owns a prefix under /api, and the prefix is stripped
+# before the request reaches it, so the service itself still serves /v1/accounts,
+# /actuator/health and /swagger-ui.html exactly as it does locally.
+#
+#   https://vaullet.dev/api/auth/actuator/health  ->  auth-service /actuator/health
+#   https://vaullet.dev/api/auth/v1/accounts      ->  auth-service /v1/accounts
+#
+# /auth (no /api) is KEYCLOAK's, not this service's. Keycloak is the token issuer
+# (ADR-006); this service is the account anchor and validates those tokens like
+# every other service. The two are easy to confuse by name, hence the separate
+# prefixes.
+#
+# Precedence: web's route on vaullet.dev has no match, i.e. PathPrefix "/". Gateway
+# API ranks the longer prefix first, so /api/auth lands here and everything else
+# still reaches the site. PathPrefix matches whole path elements: /api/authx does
+# NOT match.
+#
+# Plain HTTP needs nothing here: web-https-redirect already sends every path on
+# vaullet.dev:80 to https.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: auth-service
+spec:
+  parentRefs:
+    - { name: vaullet, namespace: traefik, kind: Gateway, sectionName: websecure }
+  hostnames: [ vaullet.dev ]
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: /api/auth }
+      filters:
+        # /api/auth/actuator/health -> /actuator/health
+        - type: URLRewrite
+          urlRewrite:
+            path: { type: ReplacePrefixMatch, replacePrefixMatch: / }
+        # Tells the service the prefix it was mounted under. The platform defaults set
+        # server.forward-headers-strategy=framework, so Spring applies it to every URL
+        # it generates -- without it, Swagger UI at /api/auth/swagger-ui.html fetches
+        # /v3/api-docs from the site root and gets web's 404. SET, not add: a
+        # client-supplied X-Forwarded-Prefix is overwritten rather than trusted.
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - { name: X-Forwarded-Prefix, value: /api/auth }
+      backendRefs:
+        - { name: auth-service, port: 80 }
