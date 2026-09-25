@@ -19,4 +19,4 @@ resources:
 # this repository ships the migration and nothing that listens on a port.
 images:
   - name: ghcr.io/vaullet-dev/auth-service
-    newTag: "0.2.0"
+    newTag: "0.4.0"
