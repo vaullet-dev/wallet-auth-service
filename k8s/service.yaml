@@ -1,7 +1,6 @@
-# ClusterIP only, on purpose. ADR-011 §2 puts the external surface on an `api.`
-# subdomain, which needs its own DNS record, Gateway listener and certificate SAN
-# -- so the HTTPRoute lands with those rather than being half-wired now. Callers
-# inside the cluster reach it here; ADR-008 governs service-to-service auth.
+# ClusterIP. Public traffic arrives through k8s/httproute.yaml as vaullet.dev/api/auth;
+# callers inside the cluster use this Service directly (ADR-008 governs
+# service-to-service auth).
 apiVersion: v1
 kind: Service
 metadata:
