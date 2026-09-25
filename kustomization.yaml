@@ -8,15 +8,16 @@ resources:
   - k8s/migrate-job.yaml
   - k8s/deployment.yaml
   - k8s/service.yaml
+  - k8s/httproute.yaml
 
-# CI rewrites newTag on every release. This one line IS the deployment: Argo CD
-# reconciles the cluster to whatever tag is committed here.
+# This one line IS the deployment: Argo CD reconciles the cluster to whatever tag is
+# committed here. It is bumped BY HAND for now -- semantic-release commits only
+# CHANGELOG.md, so a release builds and pushes an image and deploys nothing. Bump it
+# with a no-release commit type (chore(deploy): ...), or the bump itself cuts a
+# release of an image identical to the one it points at.
 #
-# No Deployment, Service or HTTPRoute yet, and that is deliberate rather than
-# unfinished. application.yaml declares the JWT issuer with no default, so an
-# unset OAUTH2_ISSUER_URI means no JwtDecoder and the context refuses to start
-# rather than serving unauthenticated. Keycloak is not deployed; until it is,
-# this repository ships the migration and nothing that listens on a port.
+# 0.3.0 is the floor for the Deployment: V2__grant_app_role.sql is what lets auth_app
+# read its own table. An older tag starts healthy and fails every query.
 images:
   - name: ghcr.io/vaullet-dev/auth-service
     newTag: "0.5.0"
