@@ -1,3 +1,9 @@
+## [0.5.0](https://github.com/vaullet-dev/wallet-auth-service/compare/v0.4.0...v0.5.0) (2026-09-25)
+
+### Features
+
+* deploy ([0cb9853](https://github.com/vaullet-dev/wallet-auth-service/commit/0cb98533c2d236383e74481d0af3fc14e200cff6))
+
 ## [0.4.0](https://github.com/vaullet-dev/wallet-auth-service/compare/v0.3.0...v0.4.0) (2026-09-21)
 
 ### Features
