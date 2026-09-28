@@ -10,6 +10,11 @@ resources:
   - k8s/service.yaml
   - k8s/httproute.yaml
 
+# DEMO ONLY: seeds the account of the per-role test users (the Keycloak side lives in gitops,
+# apps/keycloak-config). A customer deployment leaves this line out.
+components:
+  - k8s/test-users
+
 # This one line IS the deployment: Argo CD reconciles the cluster to whatever tag is
 # committed here. It is bumped BY HAND for now -- semantic-release commits only
 # CHANGELOG.md, so a release builds and pushes an image and deploys nothing. Bump it
