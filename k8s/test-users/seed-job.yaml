@@ -1,0 +1,54 @@
+# Seeds the test account after every sync. A PostSync hook: it runs once the migration Job has
+# finished and the Deployment is healthy, so the table and its grants are guaranteed to exist.
+# BeforeHookCreation replaces the previous run, the same pattern as auth-migrate.
+#
+# psql from the CloudNativePG image rather than the service image: seeding is one INSERT, and the
+# image is already on every node (Keycloak's schema init container uses it).
+#
+# Holds auth_app, the running service's own role, not the migrator: seeding is DML, and auth_app
+# can INSERT into accounts and do nothing else.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: auth-seed-test-accounts
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 300
+  template:
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 26               # the image's postgres user
+        seccompProfile: { type: RuntimeDefault }
+      volumes:
+        - name: seed
+          configMap: { name: auth-seed-test-accounts }
+      containers:
+        - name: seed
+          image: ghcr.io/cloudnative-pg/postgresql:18.6
+          imagePullPolicy: IfNotPresent
+          command: [ "psql", "-X", "-v", "ON_ERROR_STOP=1", "-f", "/seed/seed-test-accounts.sql" ]
+          env:
+            - { name: PGHOST,        value: platform-rw.postgres.svc }
+            - { name: PGPORT,        value: "5432" }
+            - { name: PGDATABASE,    value: auth_db }
+            - { name: PGAPPNAME,     value: auth-seed-test-accounts }
+            - { name: PGSSLMODE,     value: require }
+            - name: PGUSER
+              valueFrom: { secretKeyRef: { name: db-app, key: DB_USERNAME } }
+            - name: PGPASSWORD
+              valueFrom: { secretKeyRef: { name: db-app, key: DB_PASSWORD } }
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits:   { memory: 128Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ ALL ] }
+          volumeMounts:
+            - { name: seed, mountPath: /seed, readOnly: true }

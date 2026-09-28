@@ -1,0 +1,13 @@
+# DEMO ONLY: the auth_db side of the per-role test users. The Keycloak side, one user per ADR-006
+# role, lives in gitops (apps/keycloak-config/realm/20-vaullet-test-users.yaml).
+#
+# A kustomize Component rather than plain resources, so it is one line to leave out: a customer
+# deployment simply does not list it under `components:`.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - seed-job.yaml
+configMapGenerator:
+  - name: auth-seed-test-accounts
+    files:
+      - seed-test-accounts.sql
