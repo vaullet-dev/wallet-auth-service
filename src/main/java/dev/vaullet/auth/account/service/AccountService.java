@@ -35,24 +35,12 @@ import org.springframework.validation.annotation.Validated;
  * user is: Keycloak puts a client scope in the token of everyone who signs in through a client
  * it is attached to. Reads used to take {@code identity:read} alone, which let in any user of
  * such a client, {@code END_USER} included. The staff roles are listed once, in
- * {@code READ_ACCESS}, so the rule is still one line to maintain rather than five roles repeated
- * on every getter.
+ * {@code AccountAccess.READ}, so the rule is still one line to maintain rather than five roles
+ * repeated on every getter — and {@code EndUserService} reads identities under the same one.
  */
 @Validated
 @Service
 public class AccountService {
-
-    /**
-     * Who may read an account: {@code identity:read} <em>and</em> one of ADR-006's staff roles —
-     * the README's "{@code SUPPORT_AGENT} and up".
-     *
-     * <p>An allow-list rather than "anyone but {@code END_USER}": a token with no role at all, or a
-     * role added to the realm later, is refused until someone decides otherwise. An end user
-     * reading their own account arrives with the {@code account_id} claim in step 2, and operator
-     * backends on client credentials in step 5; each becomes a clause here when it does.
-     */
-    private static final String READ_ACCESS = "hasAuthority('SCOPE_identity:read') and hasAnyRole("
-            + "'SUPPORT_AGENT', 'FRAUD_REVIEWER', 'FINANCE', 'CONFIG_ADMIN', 'SUPER_ADMIN')";
 
     private final AccountRepository accounts;
 
@@ -94,7 +82,7 @@ public class AccountService {
      * @param command what to create, validated on the way in
      */
     @Transactional
-    @PreAuthorize("hasAuthority('SCOPE_identity:admin') and hasRole('SUPER_ADMIN')")
+    @PreAuthorize(AccountAccess.USER_ADMIN)
     public Account create(@Valid NewAccount command) {
         Optional<Account> byRef = command.getExternalRef()
                 .flatMap(accounts::findByExternalRef)
@@ -173,14 +161,14 @@ public class AccountService {
     }
 
     @Transactional(readOnly = true)
-    @PreAuthorize(READ_ACCESS)
+    @PreAuthorize(AccountAccess.READ)
     public Account find(UUID accountId) {
         return accounts.findById(accountId).map(AccountService::toDomain)
                 .orElseThrow(() -> new ResourceNotFoundException("Account", accountId));
     }
 
     @Transactional(readOnly = true)
-    @PreAuthorize(READ_ACCESS)
+    @PreAuthorize(AccountAccess.READ)
     public Account findByExternalRef(String externalRef) {
         return accounts.findByExternalRef(externalRef).map(AccountService::toDomain)
                 .orElseThrow(() -> new ResourceNotFoundException("Account", externalRef));
@@ -202,7 +190,7 @@ public class AccountService {
      * {@code DELETE} whose response it lost should not get an error for asking twice.
      */
     @Transactional
-    @PreAuthorize("hasAuthority('SCOPE_identity:admin') and hasRole('FRAUD_REVIEWER')")
+    @PreAuthorize(AccountAccess.FREEZE)
     public Account changeStatus(UUID accountId, AccountStatus newStatus) {
         Optional<Account> updated =
                 accounts.updateStatusIfOpen(accountId, newStatus.name()).map(AccountService::toDomain);
@@ -219,7 +207,8 @@ public class AccountService {
         throw new AccountClosedException(accountId);
     }
 
-    private static Account toDomain(AccountRepository.AccountRow row) {
+    /** Shared with {@code EndUserService}, which creates rows of the same table. */
+    static Account toDomain(AccountRepository.AccountRow row) {
         return new Account(
                 row.getAccountId(),
                 row.getKeycloakSub(),

@@ -565,8 +565,8 @@ Roles are realm roles from `realm_access.roles`, mapped to `ROLE_*` by `backend-
 **Every rule needs the role, reads included.** A scope says what the client may ask for, not who
 the user is: Keycloak puts a client scope in the token of everyone who signs in through a client it
 is attached to, `END_USER`s included. So `identity:read` on its own admits anyone the client admits,
-and it is the role that says who is asking. The read rule is written once, as `READ_ACCESS` in
-`AccountService`.
+and it is the role that says who is asking. Each rule is written once, in `AccountAccess`, and both
+`AccountService` and `EndUserService` use them.
 
 **The freeze deliberately sits on a different endpoint from user administration.** Two endpoints,
 two roles, two audit streams — ADR-006's separation of duties comes out of the resource layout
@@ -579,6 +579,50 @@ step 2 adds a Kafka listener that must be governed by the same rules without a s
 
 ---
 
+## End users (local mode)
+
+With `AUTH_PROVIDER=local` this service creates end users itself: a Keycloak user and its account,
+together (ADR-014 §6). `POST /v1/accounts` takes an optional `identity`; without one it creates the
+anchor alone, as before.
+
+```json
+{
+  "external_ref": "acme-user-8813",
+  "identity": {
+    "username": "jane.doe",
+    "email": "jane.doe@example.com",
+    "first_name": "Jane",
+    "last_name": "Doe",
+    "password": "a temporary one, optional"
+  }
+}
+```
+
+**The order is what makes a repeat safe.** The account id is minted first and the Keycloak user is
+created carrying it as `account_id`, so the anchor's primary key and the token claim are one value
+from the start. Then the anchor row, which is the commit point, then `END_USER`. A create that died
+between Keycloak and the database is finished by the retry: Keycloak answers 409, and a user with an
+`account_id` and the requested email address is recognised as this request's own. Details in
+`EndUserService`.
+
+`GET`/`PATCH /v1/accounts/{id}/identity` read and change the Keycloak user; nothing is stored here.
+`DELETE /v1/accounts/{id}` closes the account and deletes the Keycloak user. `account_id` and
+everything keyed to it stay.
+
+**What the realm must provide** (gitops, `apps/keycloak-config`):
+
+- a confidential client `wallet-auth-service` with service accounts on and every flow off, whose
+  service account holds realm-management `manage-users`, `view-users` and `view-realm`;
+- `account_id` declared in the user profile with **edit for admin only**. Undeclared, Keycloak
+  drops the attribute silently; user-editable, a user could change which account their tokens name.
+  The service checks this before its first create and refuses to continue otherwise;
+- the client's secret in OpenBao at `kv/wallet-auth/keycloak-client` (`secret`), read here by
+  `k8s/externalsecret-keycloak-client.yaml` and by keycloak-config-cli in the `keycloak` namespace.
+
+The Admin API is called on Keycloak's in-cluster Service, never through `vaullet.dev/auth`.
+
+---
+
 ## Build order
 
 ADR-014's order, because each step is independently useful and the first one unblocks other repos.
@@ -588,7 +632,7 @@ ADR-014's order, because each step is independently useful and the first one unb
 | 1 | **The anchor** — migration, DAO, service, `POST`/`GET /v1/accounts`, `by-ref`, `PATCH` status | **Federated mode is complete here.** 25 main sources, 45 tests | ✅ **done** 2026-09-17 |
 | 2 | Token validation, the `account_id` protocol mapper, JIT provisioning, and the `identity.account-created.v1` producer | Tokens carry `account_id`; the unlinked anchor gets linked; the ledger gains its `account_balances` row | ⬜ **next** |
 | 3 | Status enforcement and the Redis-cached gateway check | The freeze takes effect | ⬜ |
-| 4 | The Keycloak admin client and the identity sub-resources | Local mode's user management — the facade | ⬜ |
+| 4 | The Keycloak admin client and the identity sub-resources | Local mode's user management — the facade | 🟡 **end users first** (#17): create with an identity, `GET`/`PATCH …/identity`, `DELETE`. Staff users, roles, password reset and search follow |
 | 5 | `api_clients` and token exchange (RFC 8693) | Operator server-to-server integration | ⬜ |
 
 Nothing else in the platform depends on steps 4 or 5, which is why they are last despite being the

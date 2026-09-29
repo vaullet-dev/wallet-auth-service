@@ -9,22 +9,24 @@ import org.springframework.http.HttpStatus;
  * The error codes that belong to identity, alongside the platform ones in {@link CommonErrorType}.
  *
  * <p>The membership test {@code backend-common-core} applies is "would a service that knows nothing
- * about this domain still raise it". All three below fail it — none of them mean anything to a
+ * about this domain still raise it". Every entry below fails it — none of them mean anything to a
  * service with no notion of an account — so they live here rather than in the shared catalogue.
  *
- * <h2>Why three codes and not one</h2>
+ * <h2>Why specific codes and not one</h2>
  *
- * <p>Every one of these could have been {@link CommonErrorType#RESOURCE_CONFLICT}, and that would
+ * <p>Every conflict here could have been {@link CommonErrorType#RESOURCE_CONFLICT}, and that would
  * have been technically correct and practically useless. An integrator that gets a bare 409 from
- * {@code POST /v1/accounts} has three different problems to tell apart — their own identifier is
- * already mapped, the identity is already mapped, or the account is closed — and each has a
- * different fix, only one of which is "retry". A code the caller can branch on is the difference
- * between a self-service integration and a support ticket.
+ * {@code POST /v1/accounts} has several different problems to tell apart — their own identifier is
+ * already mapped, the identity is already mapped, the account is closed, the username or the email
+ * address belongs to someone else — and each has a different fix, only one of which is "retry". A
+ * code the caller can branch on is the difference between a self-service integration and a support
+ * ticket.
  *
- * <p>All three are 409 rather than 422: the request is well formed and would be valid against
+ * <p>The conflicts are 409 rather than 422: the request is well formed and would be valid against
  * different state. That distinction is the one ADR-011 §7 draws, and it is worth keeping honest —
- * a 422 tells an integrator to fix their payload, which here would send them looking for a bug that
- * is not in their code.
+ * a 422 tells an integrator to fix their payload, which for a conflict would send them looking for a
+ * bug that is not in their code. The two 422s below are the cases where the payload <em>is</em> the
+ * problem.
  *
  * <p>Adding an entry is additive and safe. Changing what an existing entry <em>means</em> is a
  * breaking change for every caller that branches on it, and needs a new major API version
@@ -69,7 +71,41 @@ public enum AuthErrorType implements ErrorType {
      * first so the caller gets an explanation; the trigger is the backstop for every other code path.
      * Both refuse, but only one of them says why.
      */
-    ACCOUNT_CLOSED("account-closed", HttpStatus.CONFLICT, "Account is closed");
+    ACCOUNT_CLOSED("account-closed", HttpStatus.CONFLICT, "Account is closed"),
+
+    /**
+     * Keycloak already has a user with this username, and it is not one this service created for this
+     * request.
+     *
+     * <p>A repeat of an earlier create is not this: the service recognises its own user by the
+     * {@code account_id} it wrote and the email address it sent, and answers with the account. This
+     * code is for the username belonging to somebody else — another end user, a staff account, or a
+     * user who registered through Keycloak's own pages.
+     */
+    USERNAME_TAKEN("username-taken", HttpStatus.CONFLICT, "Username already taken"),
+
+    /**
+     * Keycloak already has a user with this email address. The realm keeps addresses unique, which is
+     * what makes password reset and login by email mean one person.
+     */
+    EMAIL_TAKEN("email-taken", HttpStatus.CONFLICT, "Email address already in use"),
+
+    /**
+     * Keycloak refused the identity itself: a password that fails the realm's password policy, or a
+     * value one of the realm's user-profile validators rejects.
+     *
+     * <p>422 rather than 409, the distinction ADR-011 §7 draws: the same values would fail against any
+     * state, so the fix is in the payload. The detail carries Keycloak's own reason.
+     */
+    IDENTITY_REJECTED("identity-rejected", HttpStatus.valueOf(422), "Identity rejected by the identity provider"),
+
+    /**
+     * The request carried an identity, and this deployment does not manage users: it runs with
+     * {@code auth.provider: federated}, where identities come from the operator's own identity
+     * provider (ADR-014 §2). The fix is to send the account without {@code identity}.
+     */
+    USER_MANAGEMENT_UNAVAILABLE(
+            "user-management-unavailable", HttpStatus.valueOf(422), "User management is not available in this deployment");
 
     private final URI type;
     private final HttpStatus status;

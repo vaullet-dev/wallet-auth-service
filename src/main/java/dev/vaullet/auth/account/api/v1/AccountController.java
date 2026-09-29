@@ -2,15 +2,21 @@ package dev.vaullet.auth.account.api.v1;
 
 import dev.vaullet.auth.account.api.v1.dto.AccountResponse;
 import dev.vaullet.auth.account.api.v1.dto.CreateAccountRequest;
+import dev.vaullet.auth.account.api.v1.dto.IdentityRequest;
 import dev.vaullet.auth.account.api.v1.dto.UpdateAccountStatusRequest;
+import dev.vaullet.auth.account.service.Account;
 import dev.vaullet.auth.account.service.AccountService;
+import dev.vaullet.auth.account.service.EndUserService;
 import dev.vaullet.auth.account.service.NewAccount;
+import dev.vaullet.auth.account.service.NewEndUser;
+import dev.vaullet.auth.common.error.exception.UserManagementUnavailableException;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.net.URI;
 import java.util.UUID;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -51,8 +57,12 @@ class AccountController {
 
     private final AccountService accounts;
 
-    AccountController(AccountService accounts) {
+    /** Present only with {@code auth.provider: local}; see {@link #endUsers()}. */
+    private final ObjectProvider<EndUserService> endUsers;
+
+    AccountController(AccountService accounts, ObjectProvider<EndUserService> endUsers) {
         this.accounts = accounts;
+        this.endUsers = endUsers;
     }
 
     @PostMapping
@@ -61,13 +71,28 @@ class AccountController {
             description = "Repeating the request with the same external_ref returns the original account "
                     + "rather than creating a second one, so no Idempotency-Key is needed.")
     @ApiResponse(responseCode = "201", description = "Created, or the original account replayed")
-    @ApiResponse(responseCode = "409", description = "EXTERNAL_REF_TAKEN | ACCOUNT_CLOSED")
+    @ApiResponse(responseCode = "409",
+            description = "EXTERNAL_REF_TAKEN | IDENTITY_ALREADY_LINKED | ACCOUNT_CLOSED | USERNAME_TAKEN | EMAIL_TAKEN")
+    @ApiResponse(responseCode = "422", description = "IDENTITY_REJECTED | USER_MANAGEMENT_UNAVAILABLE")
+    @ApiResponse(responseCode = "503", description = "UPSTREAM_UNAVAILABLE — Keycloak did not answer")
     ResponseEntity<AccountResponse> create(
             @Valid @RequestBody CreateAccountRequest request, UriComponentsBuilder uriBuilder) {
 
-        // The wire shape becomes the domain command here, and this line is the boundary that lets one
-        // change without the other. keycloak_sub is null by construction: no HTTP caller can know one.
-        var account = accounts.create(new NewAccount(null, request.getExternalRef()));
+        // The wire shape becomes the domain command here, and these lines are the boundary that lets
+        // one change without the other. keycloak_sub is never taken from the caller: either Keycloak
+        // mints it from `identity`, or the anchor is created without one.
+        IdentityRequest identity = request.getIdentity();
+//        TODO @Pedja
+        Account account = identity == null
+                ? accounts.create(new NewAccount(null, request.getExternalRef()))
+                : endUsers().create(new NewEndUser(
+                        request.getExternalRef(),
+                        identity.getUsername(),
+                        identity.getEmail(),
+                        identity.getFirstName(),
+                        identity.getLastName(),
+                        identity.isEmailVerified(),
+                        identity.getPassword()));
 
         URI location = uriBuilder.path("/v1/accounts/{id}").buildAndExpand(account.getAccountId()).toUri();
 
@@ -103,5 +128,18 @@ class AccountController {
     AccountResponse updateStatus(
             @PathVariable UUID id, @Valid @RequestBody UpdateAccountStatusRequest request) {
         return AccountResponse.from(accounts.changeStatus(id, request.getStatus()));
+    }
+
+    /**
+     * The end-user service, or the refusal that stands in for it where this deployment does not
+     * manage users. An identity sent to a federated deployment is refused rather than dropped: a 201
+     * for an account whose user was never created would be found out at that user's first login.
+     */
+    private EndUserService endUsers() {
+        EndUserService service = endUsers.getIfAvailable();
+        if (service == null) {
+            throw new UserManagementUnavailableException();
+        }
+        return service;
     }
 }
