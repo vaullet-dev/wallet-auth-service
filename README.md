@@ -560,7 +560,13 @@ Roles are realm roles from `realm_access.roles`, mapped to `ROLE_*` by `backend-
 | --- | --- |
 | `POST /v1/accounts`, the identity sub-resources, `DELETE` | `SUPER_ADMIN` |
 | `PATCH /v1/accounts/{id}` — the freeze | `FRAUD_REVIEWER` |
-| `GET` anything | `SUPPORT_AGENT` and up |
+| `GET` anything | `SUPPORT_AGENT` and up: every ADR-006 role except `END_USER` |
+
+**Every rule needs the role, reads included.** A scope says what the client may ask for, not who
+the user is: Keycloak puts a client scope in the token of everyone who signs in through a client it
+is attached to, `END_USER`s included. So `identity:read` on its own admits anyone the client admits,
+and it is the role that says who is asking. The read rule is written once, as `READ_ACCESS` in
+`AccountService`.
 
 **The freeze deliberately sits on a different endpoint from user administration.** Two endpoints,
 two roles, two audit streams — ADR-006's separation of duties comes out of the resource layout
