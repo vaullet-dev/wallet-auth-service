@@ -29,12 +29,30 @@ import org.springframework.validation.annotation.Validated;
  * {@code common.version}.
  *
  * <p>Roles as well as scopes, because ADR-006's separation of duties is the point: creating an
- * account is {@code SUPER_ADMIN}'s and freezing one is {@code FRAUD_REVIEWER}'s. Reads take a scope
- * alone — enumerating five roles on every getter would be a rule nobody maintains.
+ * account is {@code SUPER_ADMIN}'s and freezing one is {@code FRAUD_REVIEWER}'s.
+ *
+ * <p><b>Reads need a role too.</b> A scope says what the <em>client</em> may ask for, not who the
+ * user is: Keycloak puts a client scope in the token of everyone who signs in through a client
+ * it is attached to. Reads used to take {@code identity:read} alone, which let in any user of
+ * such a client, {@code END_USER} included. The staff roles are listed once, in
+ * {@code READ_ACCESS}, so the rule is still one line to maintain rather than five roles repeated
+ * on every getter.
  */
 @Validated
 @Service
 public class AccountService {
+
+    /**
+     * Who may read an account: {@code identity:read} <em>and</em> one of ADR-006's staff roles —
+     * the README's "{@code SUPPORT_AGENT} and up".
+     *
+     * <p>An allow-list rather than "anyone but {@code END_USER}": a token with no role at all, or a
+     * role added to the realm later, is refused until someone decides otherwise. An end user
+     * reading their own account arrives with the {@code account_id} claim in step 2, and operator
+     * backends on client credentials in step 5; each becomes a clause here when it does.
+     */
+    private static final String READ_ACCESS = "hasAuthority('SCOPE_identity:read') and hasAnyRole("
+            + "'SUPPORT_AGENT', 'FRAUD_REVIEWER', 'FINANCE', 'CONFIG_ADMIN', 'SUPER_ADMIN')";
 
     private final AccountRepository accounts;
 
@@ -155,14 +173,14 @@ public class AccountService {
     }
 
     @Transactional(readOnly = true)
-    @PreAuthorize("hasAuthority('SCOPE_identity:read')")
+    @PreAuthorize(READ_ACCESS)
     public Account find(UUID accountId) {
         return accounts.findById(accountId).map(AccountService::toDomain)
                 .orElseThrow(() -> new ResourceNotFoundException("Account", accountId));
     }
 
     @Transactional(readOnly = true)
-    @PreAuthorize("hasAuthority('SCOPE_identity:read')")
+    @PreAuthorize(READ_ACCESS)
     public Account findByExternalRef(String externalRef) {
         return accounts.findByExternalRef(externalRef).map(AccountService::toDomain)
                 .orElseThrow(() -> new ResourceNotFoundException("Account", externalRef));
