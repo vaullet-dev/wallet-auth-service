@@ -1,3 +1,9 @@
+## [0.8.0](https://github.com/vaullet-dev/wallet-auth-service/compare/v0.7.0...v0.8.0) (2026-09-29)
+
+### Features
+
+* end user CRUD ([2d9a848](https://github.com/vaullet-dev/wallet-auth-service/commit/2d9a8489643b55abfa4d6f02ca32cd5bdb0444ea))
+
 ## [0.7.0](https://github.com/vaullet-dev/wallet-auth-service/compare/v0.6.0...v0.7.0) (2026-09-29)
 
 ### Features
