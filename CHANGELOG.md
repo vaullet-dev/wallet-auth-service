@@ -1,3 +1,9 @@
+## [0.7.0](https://github.com/vaullet-dev/wallet-auth-service/compare/v0.6.0...v0.7.0) (2026-09-29)
+
+### Features
+
+* lock account reads ([3f861f8](https://github.com/vaullet-dev/wallet-auth-service/commit/3f861f88355c858f7792db3c6b1319965a45940a))
+
 ## [0.6.0](https://github.com/vaullet-dev/wallet-auth-service/compare/v0.5.0...v0.6.0) (2026-09-25)
 
 ### Features
