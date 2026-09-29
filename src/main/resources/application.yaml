@@ -146,6 +146,25 @@ app:
   # Free-form environment label, interpolated into the OpenAPI description below.
   environment: ${APP_ENVIRONMENT:unknown}
 
+# ---------------------------------------------------------------------------
+# Identity mode — ADR-014 §9. Bound and documented by AuthProperties.
+# ---------------------------------------------------------------------------
+auth:
+  # `federated` unless a deployment says otherwise: it is the mode that makes no
+  # outbound call and holds no realm-management credential. `local` switches on end
+  # users — POST /v1/accounts with an identity, the identity endpoints and DELETE.
+  provider: ${AUTH_PROVIDER:federated}
+  keycloak:
+    # The in-cluster Service, relative path included, e.g.
+    # http://keycloak-keycloakx-http.keycloak.svc/auth. Not the public vaullet.dev/auth:
+    # the gateway route to /auth/admin/ is one that should close. Required in local mode.
+    url: ${KEYCLOAK_URL:}
+    realm: ${KEYCLOAK_REALM:vaullet}
+    client-id: ${KEYCLOAK_CLIENT_ID:wallet-auth-service}
+    # From OpenBao via External Secrets, like the database password. Required in local mode.
+    client-secret: ${KEYCLOAK_CLIENT_SECRET:}
+    timeout: 5s
+
 vaullet:
   api:
     # Empty by default: this service's callers are the gateway and other services
@@ -154,9 +173,9 @@ vaullet:
     # ADR-011 §2 puts the major version in the path; the library default already
     # matches, and it is restated because CORS scope is worth being explicit about.
     cors-path-pattern: /v1/**
-    # DELETE is absent because account closure is step 4, not step 1. Widening CORS
-    # for a method no endpoint answers is a permission granted for nothing.
-    allowed-methods: GET,POST,PATCH
+    # DELETE arrived with step 4: closing an account and erasing its identity. It is
+    # only answered with auth.provider: local, and CORS is off by default anyway.
+    allowed-methods: GET,POST,PATCH,DELETE
 
   security:
     # What the @PreAuthorize rules in this service ask for. Under the `local` profile
