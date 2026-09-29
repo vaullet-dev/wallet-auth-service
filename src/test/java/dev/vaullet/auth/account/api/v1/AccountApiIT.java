@@ -14,11 +14,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.vaullet.common.test.IntegrationTest;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -63,6 +66,13 @@ class AccountApiIT {
         return jwt().authorities(
                 new SimpleGrantedAuthority("SCOPE_identity:read"),
                 new SimpleGrantedAuthority("ROLE_SUPPORT_AGENT"));
+    }
+
+    /** {@code identity:read}, which every user of the client gets, plus one ADR-006 role. */
+    private static JwtRequestPostProcessor readerWithRole(String role) {
+        return jwt().authorities(
+                new SimpleGrantedAuthority("SCOPE_identity:read"),
+                new SimpleGrantedAuthority("ROLE_" + role));
     }
 
     @BeforeEach
@@ -165,6 +175,58 @@ class AccountApiIT {
             mvc.perform(get("/v1/accounts/by-ref/{ref}", "acme-user-8813").with(reader()))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.account_id", is(id)));
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @ValueSource(strings = {
+                "SUPPORT_AGENT", "FRAUD_REVIEWER", "FINANCE", "CONFIG_ADMIN", "SUPER_ADMIN"})
+        @DisplayName("every staff role can read, by id and by reference")
+        void staff_can_read(String role) throws Exception {
+            String id = createAccount("acme-user-8813");
+
+            mvc.perform(get("/v1/accounts/{id}", id).with(readerWithRole(role)))
+                    .andExpect(status().isOk());
+            mvc.perform(get("/v1/accounts/by-ref/{ref}", "acme-user-8813").with(readerWithRole(role)))
+                    .andExpect(status().isOk());
+        }
+
+        @Test
+        @DisplayName("identity:read without a staff role is refused, END_USER included")
+        void scope_alone_is_not_enough() throws Exception {
+            String id = createAccount("acme-user-8813");
+
+            // The scope is what everyone signing in through a client with identity:read attached
+            // receives, so on its own it says nothing about who is asking.
+            var endUser = readerWithRole("END_USER");
+            var noRole = jwt().authorities(new SimpleGrantedAuthority("SCOPE_identity:read"));
+
+            for (var caller : List.of(endUser, noRole)) {
+                mvc.perform(get("/v1/accounts/{id}", id).with(caller))
+                        .andExpect(status().isForbidden())
+                        .andExpect(jsonPath("$.code", is("ACCESS_DENIED")));
+                mvc.perform(get("/v1/accounts/by-ref/{ref}", "acme-user-8813").with(caller))
+                        .andExpect(status().isForbidden())
+                        .andExpect(jsonPath("$.code", is("ACCESS_DENIED")));
+            }
+        }
+
+        @Test
+        @DisplayName("a staff role without the scope is refused too")
+        void role_alone_is_not_enough() throws Exception {
+            String id = createAccount("acme-user-8813");
+
+            mvc.perform(get("/v1/accounts/{id}", id)
+                            .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_SUPPORT_AGENT"))))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        @DisplayName("a refused caller cannot tell whether the account exists")
+        void refusal_does_not_reveal_existence() throws Exception {
+            // 403 for an id that exists nowhere, exactly as for one that does: the rule runs before
+            // the lookup, so the answer carries nothing about the table.
+            mvc.perform(get("/v1/accounts/{id}", UUID.randomUUID()).with(readerWithRole("END_USER")))
+                    .andExpect(status().isForbidden());
         }
 
         @Test
