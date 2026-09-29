@@ -2,17 +2,24 @@ package dev.vaullet.auth.account.api.v1.dto;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Request body for {@code POST /v1/accounts}.
  *
- * <p><b>One field, and no {@code keycloak_sub}.</b> No HTTP caller is in a position to know a
- * Keycloak subject: in local mode this service mints the realm user itself (step 4), and in
- * federated mode just-in-time provisioning supplies it at first authentication (step 2). Accepting
- * one here would offer callers an operation — attaching an identity to an existing account — that
- * this endpoint does not perform.
+ * <p><b>No {@code keycloak_sub}.</b> No HTTP caller is in a position to know a Keycloak subject: in
+ * local mode this service mints the realm user itself, from {@code identity}, and in federated mode
+ * just-in-time provisioning supplies it at first authentication (step 2). Accepting one here would
+ * offer callers an operation — attaching an identity to an existing account — that this endpoint
+ * does not perform.
+ *
+ * <p><b>{@code identity} decides what is created.</b> Present, and this deployment manages users
+ * ({@code auth.provider: local}), it creates an end user: a Keycloak user and its account together
+ * (ADR-014 §6). Absent, it creates the anchor alone, exactly as before — so existing callers see no
+ * change.
  *
  * <p>A dedicated input type rather than the domain command is what prevents mass assignment: there
  * is simply no {@code account_id}, {@code status} or {@code keycloak_sub} field for a caller to set.
@@ -26,10 +33,12 @@ import jakarta.validation.constraints.Size;
 public final class CreateAccountRequest {
 
     private final String externalRef;
+    private final @Nullable IdentityRequest identity;
 
     @JsonCreator(mode = JsonCreator.Mode.PROPERTIES)
-    public CreateAccountRequest(String externalRef) {
+    public CreateAccountRequest(String externalRef, @Nullable IdentityRequest identity) {
         this.externalRef = externalRef;
+        this.identity = identity;
     }
 
     /**
@@ -43,5 +52,12 @@ public final class CreateAccountRequest {
     @Schema(example = "acme-user-8813", description = "Your own identifier for this user. Unique per deployment, and immutable once set.")
     public String getExternalRef() {
         return externalRef;
+    }
+
+    /** The end user to create with the account. Local mode only; see the class comment. */
+    @Valid
+    @Schema(description = "Creates an end user in Keycloak with the account. Only where this deployment manages users.")
+    public @Nullable IdentityRequest getIdentity() {
+        return identity;
     }
 }
