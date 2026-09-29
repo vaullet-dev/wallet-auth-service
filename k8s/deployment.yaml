@@ -60,6 +60,15 @@ spec:
             - name: OAUTH2_ISSUER_URI
               value: https://vaullet.dev/auth/realms/vaullet
 
+            # ADR-014: this deployment manages end users itself. The Admin API is
+            # reached on Keycloak's in-cluster Service, not on vaullet.dev/auth, whose
+            # /auth/admin/ route should close. Realm and client id keep their defaults
+            # (vaullet, wallet-auth-service).
+            - { name: AUTH_PROVIDER, value: local }
+            - { name: KEYCLOAK_URL,  value: "http://keycloak-keycloakx-http.keycloak.svc/auth" }
+            - name: KEYCLOAK_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: keycloak-client, key: KEYCLOAK_CLIENT_SECRET } }
+
           # Liveness and readiness are separate endpoints for a reason: readiness
           # fails while the database is unreachable so traffic stops, but liveness
           # keeps passing so the kubelet does not restart a healthy JVM over an
