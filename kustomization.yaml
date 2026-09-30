@@ -26,4 +26,4 @@ components:
 # read its own table. An older tag starts healthy and fails every query.
 images:
   - name: ghcr.io/vaullet-dev/auth-service
-    newTag: "0.5.0"
+    newTag: "0.8.0"
