@@ -31,6 +31,16 @@ This service owns **Vaullet's own record of a user** and brokers everything abou
 
 Then open <http://localhost:8080/swagger-ui.html>.
 
+In IntelliJ the run menu offers the same thing in two ready-made configurations, checked in under
+`.run/`. Both need Docker running: **auth-service local (compose)** starts PostgreSQL from
+`compose.yaml`, like `spring-boot:run`, and **auth-service local (testcontainers)** starts a
+throwaway one through Testcontainers. Both run the `local` profile, so no token is needed, and both
+debug like any other run configuration.
+
+Locally it is plain HTTP. If the browser shows `ERR_SSL_PROTOCOL_ERROR`, it went to
+`https://localhost:8080`, usually because it remembered `https://` from another local app: type
+`http://`, or use `http://127.0.0.1:8080`.
+
 Resolving `dev.vaullet:common-*` needs a `github` server in `~/.m2/settings.xml` with a
 `read:packages` token — GitHub Packages requires authentication even for a public artifact.
 
