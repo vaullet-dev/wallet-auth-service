@@ -55,7 +55,7 @@ import org.springframework.web.client.RestClientException;
  * realm-management credentials, and a bean that could use them should not exist.
  */
 @Repository
-@ConditionalOnProperty(name = "auth.provider", havingValue = "local")
+@ConditionalOnProperty(name = "auth.provider", havingValue = "local", matchIfMissing = true)
 public class KeycloakUsers {
 
     /** The user attribute ADR-006's protocol mapper turns into the {@code account_id} claim. */

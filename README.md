@@ -18,13 +18,15 @@ This service owns **Vaullet's own record of a user** and brokers everything abou
 > stored twice.
 
 > [!IMPORTANT]
-> **Step 1 is implemented; steps 2–5 are not.** The account anchor — schema, repository, service and
-> `/v1/accounts` — is written and tested, which completes *federated* identity mode. Keycloak
-> integration, the identity facade and token exchange are not written, and nothing is deployed: the
-> cluster has no PostgreSQL and no Keycloak. Read [Build order](#build-order) for what exists.
+> **Local mode is the default, and the one being built:** Vaullet keeps the users, in its own
+> Keycloak realm. The account anchor (step 1) and end users — create with an identity,
+> `GET`/`PATCH …/identity`, `DELETE` (the first part of step 4) — are written, tested and live at
+> `vaullet.dev/api/auth`. Federated mode, where an operator's identity provider holds the users, is
+> deferred; step 1 alone never completed it, because nothing links a federated user to its account
+> yet. Read [Build order](#build-order) for what exists.
 
 ```
-./mvnw spring-boot:run     # PostgreSQL via Compose, Flyway migrates, serves on :8080
+./mvnw spring-boot:run     # PostgreSQL and Keycloak via Compose, Flyway migrates, serves on :8080
 ./mvnw test                # 19 unit + architecture tests, no Docker          (~1s)
 ./mvnw verify              # adds 26 integration tests on real PostgreSQL     (~5s)
 ```
@@ -32,10 +34,12 @@ This service owns **Vaullet's own record of a user** and brokers everything abou
 Then open <http://localhost:8080/swagger-ui.html>.
 
 In IntelliJ the run menu offers the same thing in two ready-made configurations, checked in under
-`.run/`. Both need Docker running: **auth-service local (compose)** starts PostgreSQL from
-`compose.yaml`, like `spring-boot:run`, and **auth-service local (testcontainers)** starts a
-throwaway one through Testcontainers. Both run the `local` profile, so no token is needed, and both
-debug like any other run configuration.
+`.run/`. Both need Docker running: **auth-service local (compose)** starts PostgreSQL and Keycloak
+from `compose.yaml`, like `spring-boot:run`, and **auth-service local (testcontainers)** starts
+throwaway ones through Testcontainers. Both run the `local` profile, so no token is needed, and both
+debug like any other run configuration. Keycloak has the test realm imported, so the end-user
+endpoints work locally too; its admin console is at <http://localhost:58080/admin/> (admin/admin)
+for the Compose one.
 
 Locally it is plain HTTP. If the browser shows `ERR_SSL_PROTOCOL_ERROR`, it went to
 `https://localhost:8080`, usually because it remembered `https://` from another local app: type
@@ -141,6 +145,9 @@ ours.
 selected per deployment by `auth.provider` in the customer's Helm values. **User management is not
 something an operator buys** — it arrives with `local` and is unavailable under `federated`, where
 the operator's own directory does the job.
+
+**`local` is the default and the mode being built.** `federated` is deferred until an operator
+brings its own identity provider; a deployment selects it with `AUTH_PROVIDER=federated`.
 
 | | `auth.provider: local` | `auth.provider: federated` |
 | --- | --- | --- |
@@ -591,7 +598,7 @@ step 2 adds a Kafka listener that must be governed by the same rules without a s
 
 ## End users (local mode)
 
-With `AUTH_PROVIDER=local` this service creates end users itself: a Keycloak user and its account,
+In local mode, the default, this service creates end users itself: a Keycloak user and its account,
 together (ADR-014 §6). `POST /v1/accounts` takes an optional `identity`; without one it creates the
 anchor alone, as before.
 
@@ -639,7 +646,7 @@ ADR-014's order, because each step is independently useful and the first one unb
 
 | # | Step | What it delivers | State |
 | --- | --- | --- | --- |
-| 1 | **The anchor** — migration, DAO, service, `POST`/`GET /v1/accounts`, `by-ref`, `PATCH` status | **Federated mode is complete here.** 25 main sources, 45 tests | ✅ **done** 2026-09-17 |
+| 1 | **The anchor** — migration, DAO, service, `POST`/`GET /v1/accounts`, `by-ref`, `PATCH` status | What both modes stand on. 25 main sources, 45 tests | ✅ **done** 2026-09-17 |
 | 2 | Token validation, the `account_id` protocol mapper, JIT provisioning, and the `identity.account-created.v1` producer | Tokens carry `account_id`; the unlinked anchor gets linked; the ledger gains its `account_balances` row | ⬜ **next** |
 | 3 | Status enforcement and the Redis-cached gateway check | The freeze takes effect | ⬜ |
 | 4 | The Keycloak admin client and the identity sub-resources | Local mode's user management — the facade | 🟡 **end users first** (#17): create with an identity, `GET`/`PATCH …/identity`, `DELETE`. Staff users, roles, password reset and search follow |

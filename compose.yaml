@@ -5,10 +5,10 @@
 # Testcontainers provides the same PostgreSQL to the test suite, so there is exactly one
 # definition of "what this service needs to run" and it is checked in.
 #
-# Keycloak is NOT here yet. It arrives at step 2 of ADR-014's build order, together with
-# its realm as declarative YAML. Step 1 needs no identity provider at all: the anchor's
-# keycloak_sub is nullable, and common-test supplies a JwtDecoder stand-in so the real
-# security chain is exercised without one.
+# Keycloak is here because local mode is the default: this service creates end users in
+# it, and refuses to start without one. It imports the realm the integration tests use
+# (src/test/resources/keycloak), and nobody signs in to it: under the `local` profile
+# every request runs as the anonymous principal, so no token is needed.
 services:
   postgres:
     image: postgres:18-alpine
@@ -44,3 +44,25 @@ services:
       # image puts the cluster in a version-named subdirectory, and mounting the old path
       # makes the container refuse to start.
       - /var/lib/postgresql
+
+  keycloak:
+    # Production's version (gitops, clusters/prod/keycloak.yaml), as in KeycloakTestContainer.
+    image: quay.io/keycloak/keycloak:26.7.4
+    command: ['start-dev', '--import-realm']
+    environment:
+      # Throwaway, like everything else here. Admin console: http://localhost:58080/admin/
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    ports:
+      # Not 8080, which is this service's own port. Override with KEYCLOAK_HOST_PORT, and
+      # application-local.yaml follows it.
+      - '${KEYCLOAK_HOST_PORT:-58080}:8080'
+    volumes:
+      - ./src/test/resources/keycloak:/opt/keycloak/data/import:ro
+    healthcheck:
+      # The realm answers only once the import has finished, the same signal
+      # KeycloakTestContainer waits for. The image has no curl, so bash's /dev/tcp asks.
+      test: ['CMD', 'bash', '-c', "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /realms/vaullet HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q '200 OK' <&3"]
+      interval: 5s
+      timeout: 3s
+      retries: 36
