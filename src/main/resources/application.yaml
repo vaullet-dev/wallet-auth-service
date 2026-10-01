@@ -150,10 +150,13 @@ app:
 # Identity mode — ADR-014 §9. Bound and documented by AuthProperties.
 # ---------------------------------------------------------------------------
 auth:
-  # `federated` unless a deployment says otherwise: it is the mode that makes no
-  # outbound call and holds no realm-management credential. `local` switches on end
-  # users — POST /v1/accounts with an identity, the identity endpoints and DELETE.
-  provider: ${AUTH_PROVIDER:federated}
+  # `local` unless a deployment says otherwise: Vaullet keeps the users, in its own
+  # Keycloak realm, and this service manages them — POST /v1/accounts with an identity,
+  # the identity endpoints and DELETE. Local mode needs auth.keycloak.url and
+  # client-secret below and refuses to start without them, so a deployment that forgot
+  # them fails at startup instead of serving without user management. `federated`, the
+  # operator's own identity provider, is deferred: it starts, but runs the anchor alone.
+  provider: ${AUTH_PROVIDER:local}
   keycloak:
     # The in-cluster Service, relative path included, e.g.
     # http://keycloak-keycloakx-http.keycloak.svc/auth. Not the public vaullet.dev/auth:

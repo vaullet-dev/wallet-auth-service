@@ -59,6 +59,17 @@ management:
 app:
   environment: local
 
+auth:
+  keycloak:
+    # Compose's Keycloak (compose.yaml), with the integration tests' realm imported. Dev
+    # mode serves it without the /auth path production uses. TestAuthApplication passes
+    # its own container's address instead, which wins over this file.
+    url: http://localhost:${KEYCLOAK_HOST_PORT:58080}
+    # The realm fixture's secret (src/test/resources/keycloak/vaullet-realm.json). Not a
+    # secret in any useful sense: that Keycloak lives on this laptop, for as long as the
+    # application runs.
+    client-secret: test-only-secret
+
 vaullet:
   api:
     # The two ports a local Admin UI would run on: Create React App and Vite. Only
