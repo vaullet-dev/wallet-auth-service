@@ -51,7 +51,7 @@ import org.springframework.stereotype.Service;
  * {@link AccountService}, and for the same reason.
  */
 @Service
-@ConditionalOnProperty(name = "auth.provider", havingValue = "local")
+@ConditionalOnProperty(name = "auth.provider", havingValue = "local", matchIfMissing = true)
 public class EndUserService {
 
     /** The realm role every account created here gets, and the only one: this service makes end users. */

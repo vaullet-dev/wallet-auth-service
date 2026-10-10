@@ -34,7 +34,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/v1/accounts")
-@ConditionalOnProperty(name = "auth.provider", havingValue = "local")
+@ConditionalOnProperty(name = "auth.provider", havingValue = "local", matchIfMissing = true)
 @Tag(name = "Accounts")
 class EndUserController {
 

@@ -9,9 +9,11 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * This service's own settings under {@code auth.*}: ADR-014 §9's Helm values, as the application
  * reads them.
  *
- * <p><b>{@code federated} is the default</b> because it is the mode that makes no outbound call. A
- * deployment has to say {@code local} before this service holds realm-management credentials or
- * touches Keycloak's Admin API, so a missing value fails towards less privilege rather than more.
+ * <p><b>{@code local} is the default</b>: Vaullet keeps the users, in its own Keycloak realm, and this
+ * service manages them. It cannot start half-configured: the Admin API client refuses to be built
+ * without {@code auth.keycloak.url} and {@code auth.keycloak.client-secret}, so a deployment that left
+ * them out fails at startup rather than serving without user management. {@code federated} is
+ * deferred; it still starts, and runs the anchor alone.
  *
  * @param provider {@code local}: this service provisions end users in Keycloak itself.
  *     {@code federated}: identities come from the operator's own identity provider, and the
@@ -21,7 +23,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  */
 @ConfigurationProperties("auth")
 public record AuthProperties(
-        @DefaultValue("federated") Provider provider,
+        @DefaultValue("local") Provider provider,
         @DefaultValue Keycloak keycloak) {
 
     public enum Provider {

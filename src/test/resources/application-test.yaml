@@ -54,6 +54,15 @@ logging:
 app:
   environment: test
 
+auth:
+  keycloak:
+    # Local mode is the default, and its Admin API client is not built without these two.
+    # Only EndUserApiIT and KeycloakUsersIT talk to Keycloak, and both point at a real
+    # container. Everywhere else the address cannot resolve (.invalid, RFC 2606), so a test
+    # that strays into Keycloak fails loudly instead of passing against nothing.
+    url: http://keycloak.invalid
+    client-secret: unused
+
 vaullet:
   api:
     # Empty, matching a deployed environment. A test that passed only because CORS
