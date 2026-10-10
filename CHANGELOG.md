@@ -1,3 +1,12 @@
+## [0.10.0](https://github.com/vaullet-dev/wallet-auth-service/compare/v0.9.0...v0.10.0) (2026-10-10)
+
+### Features
+
+* deploy end user CRUD ([f04c539](https://github.com/vaullet-dev/wallet-auth-service/commit/f04c539e708a2522733208a6d1179aa5efbe67eb))
+* end user CRUD ([c994494](https://github.com/vaullet-dev/wallet-auth-service/commit/c9944948ac93b654d38eb0cea8127439b20ddb22))
+* local mode by default ([f1bfd42](https://github.com/vaullet-dev/wallet-auth-service/commit/f1bfd422f5fee8b2d035b9406b2813036545a22f))
+* lock account reads ([af07d93](https://github.com/vaullet-dev/wallet-auth-service/commit/af07d93d1768d17934ec205f28feb93de84d45e8))
+
 ## [0.9.0](https://github.com/vaullet-dev/wallet-auth-service/compare/v0.8.0...v0.9.0) (2026-09-30)
 
 ### Features
