@@ -1,0 +1,43 @@
+info:
+  name: Search end users
+  type: http
+  seq: 2
+
+http:
+  method: GET
+  url: "{{base_url}}/v1/accounts?search=jane&limit=50"
+  params:
+    - name: search
+      value: jane
+      type: query
+    - name: email
+      value: ""
+      type: query
+      disabled: true
+    - name: username
+      value: ""
+      type: query
+      disabled: true
+    - name: limit
+      value: "50"
+      type: query
+    - name: cursor
+      value: ""
+      type: query
+      disabled: true
+  auth: inherit
+
+runtime:
+  assertions:
+    - expression: res.status
+      operator: eq
+      value: "200"
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+  forwardAuthorizationHeader: true
+
+docs: "`search` is a prefix of the username, email address or a name (`*` is a wildcard). Or use `email` or `username` for an exact match instead; they do not combine with `search`. Each account comes with its identity."

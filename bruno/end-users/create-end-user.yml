@@ -1,0 +1,50 @@
+info:
+  name: Create end user
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: "{{base_url}}/v1/accounts"
+  body:
+    type: json
+    data: |-
+      {
+        "external_ref": "demo-{{$timestamp}}",
+        "identity": {
+          "username": "jane.doe",
+          "email": "{{end_user_email}}",
+          "first_name": "Jane",
+          "last_name": "Doe"
+        }
+      }
+  auth: inherit
+
+runtime:
+  scripts:
+    - type: after-response
+      code: |-
+        if (res.status === 201) {
+          bru.setVar("account_id", res.body.account_id);
+          bru.setVar("external_ref", res.body.external_ref);
+        }
+  assertions:
+    - expression: res.status
+      operator: eq
+      value: "201"
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+  forwardAuthorizationHeader: true
+
+docs: |-
+  Creates the account and the user in Keycloak, and Keycloak emails them an invitation: a link to set
+  their own password, valid for 72 hours.
+
+  `external_ref` is your own identifier for the user; repeating the request with the same one returns the
+  original account. Here it is `demo-` plus a timestamp, because a closed account keeps its `external_ref`
+  for good. `422 EMAIL_DELIVERY_UNAVAILABLE` means the realm has no SMTP server, and nothing was
+  created. Keeps `account_id` and `external_ref` for the requests below.

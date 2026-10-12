@@ -1,0 +1,33 @@
+info:
+  name: Set staff roles
+  type: http
+  seq: 5
+
+http:
+  method: PUT
+  url: "{{base_url}}/v1/staff/{{staff_id}}/roles"
+  body:
+    type: json
+    data: |-
+      {
+        "roles": [
+          "SUPPORT_AGENT",
+          "FRAUD_REVIEWER"
+        ]
+      }
+  auth: inherit
+
+runtime:
+  assertions:
+    - expression: res.status
+      operator: eq
+      value: "200"
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+  forwardAuthorizationHeader: true
+
+docs: The complete set, replacing what they held. Takes effect at their next token.

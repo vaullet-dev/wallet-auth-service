@@ -1,0 +1,74 @@
+opencollection: 1.0.0
+
+info:
+  name: wallet-auth-service
+  version: "1"
+config:
+  proxy:
+    inherit: true
+    config:
+      protocol: http
+      hostname: ""
+      port: ""
+      auth:
+        username: ""
+        password: ""
+      bypassProxy: ""
+
+request:
+  auth:
+    type: oauth2
+    flow: authorization_code
+    authorizationUrl: "{{oauth2_authorization_url}}"
+    accessTokenUrl: "{{oauth2_token_url}}"
+    callbackUrl: https://oauth.usebruno.com/callback
+    credentials:
+      clientId: bruno
+      placement: body
+    scope: openid
+    pkce: {}
+    tokenConfig:
+      id: credentials
+      placement:
+        header: Bearer
+      source: access_token
+    settings:
+      autoFetchToken: true
+      autoRefreshToken: true
+
+docs:
+  content: |
+    # wallet-auth-service
+
+    Every endpoint of this service: staff, end users, and the build that is running. The OpenAPI document
+    at `/swagger-ui.html` is the reference; this is for calling them.
+
+    ## Environments
+
+    - **local** — `./mvnw spring-boot:run`. The `local` profile runs every request as the anonymous
+      principal with the scopes and roles the rules ask for, so there is no sign-in and Bruno sends no
+      token (the empty OAuth2 URLs are what switch it off). Invitations land in Mailpit,
+      http://localhost:58025.
+    - **prod** — https://vaullet.dev/api/auth. The first request opens Keycloak's sign-in page through
+      the `bruno` client (authorization code with PKCE). Sign in as staff with `SUPER_ADMIN`, e.g.
+      `test-super-admin`, whose password is in OpenBao at `kv/keycloak/test-users`. The token is
+      refreshed on its own; *Clear Cache* in the collection's Auth tab drops it.
+
+    ## Before creating anyone in prod
+
+    Set the three secret variables of the **prod** environment: `end_user_email` (where the invitation
+    goes), `staff_email` and `staff_temporary_password`. Secret values stay in Bruno on this machine and
+    never reach these files, so neither a password nor a personal address ends up in git.
+
+    ## Flow
+
+    The create requests keep what they return for the requests under them: *Create staff member* sets
+    `staff_id`, *Create end user* sets `account_id` and `external_ref`. Run a folder top to bottom
+    and it creates, reads, changes and finally deletes or closes the same user.
+  type: text/markdown
+bundled: false
+extensions:
+  bruno:
+    ignore:
+      - node_modules
+      - .git

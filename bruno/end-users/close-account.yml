@@ -1,0 +1,24 @@
+info:
+  name: Close account
+  type: http
+  seq: 9
+
+http:
+  method: DELETE
+  url: "{{base_url}}/v1/accounts/{{account_id}}"
+  auth: inherit
+
+runtime:
+  assertions:
+    - expression: res.status
+      operator: eq
+      value: "204"
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+  forwardAuthorizationHeader: true
+
+docs: Sets the status to `CLOSED`, which is terminal, and deletes the user from Keycloak. The `account_id` and every financial record keyed on it stay.
