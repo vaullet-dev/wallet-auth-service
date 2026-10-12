@@ -20,11 +20,14 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  *     user-management endpoints do not exist.
  * @param keycloak where the Admin API is, and which client this service authenticates as. Read in
  *     {@code local} mode only.
+ * @param userManagement how this service manages the users it keeps. Read in {@code local} mode
+ *     only.
  */
 @ConfigurationProperties("auth")
 public record AuthProperties(
         @DefaultValue("local") Provider provider,
-        @DefaultValue Keycloak keycloak) {
+        @DefaultValue Keycloak keycloak,
+        @DefaultValue UserManagement userManagement) {
 
     public enum Provider {
         LOCAL,
@@ -60,4 +63,13 @@ public record AuthProperties(
                     + ", timeout=" + timeout + "]";
         }
     }
+
+    /**
+     * ADR-014 §9's {@code auth.user-management} block, as far as it has been built.
+     *
+     * @param emailLinkLifespan how long the link in an invitation or a password-reset email works.
+     *     Passed to Keycloak with every email, so the realm's own default — 12 hours for an email an
+     *     admin triggers — does not apply.
+     */
+    public record UserManagement(@DefaultValue("72h") Duration emailLinkLifespan) {}
 }

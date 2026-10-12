@@ -6,14 +6,23 @@ import dev.vaullet.auth.account.dao.KeycloakUsers;
 import dev.vaullet.auth.account.dao.KeycloakUsers.KeycloakUser;
 import dev.vaullet.auth.account.dao.KeycloakUsers.NewKeycloakUser;
 import dev.vaullet.auth.common.error.exception.AccountClosedException;
+import dev.vaullet.auth.common.error.exception.EmailDeliveryUnavailableException;
 import dev.vaullet.auth.common.error.exception.EmailTakenException;
 import dev.vaullet.auth.common.error.exception.ExternalRefTakenException;
 import dev.vaullet.auth.common.error.exception.IdentityAlreadyLinkedException;
 import dev.vaullet.auth.common.error.exception.UsernameTakenException;
+import dev.vaullet.auth.common.paging.Slice;
+import dev.vaullet.auth.config.AuthProperties;
 import dev.vaullet.common.error.ResourceNotFoundException;
+import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,6 +50,11 @@ import org.springframework.stereotype.Service;
  *   <li>{@code END_USER} is granted, <em>after</em> the insert. A user whose anchor never got
  *       written therefore holds no role, and a grant that failed is repeated by the replay of the
  *       retry, which grants again.
+ *   <li>The invitation goes out: Keycloak emails the user a link to set their own password, so none
+ *       passes through this service. Whether email can be sent is checked before the first write,
+ *       so a realm without SMTP refuses the request with nothing created. A send that fails anyway
+ *       is a 503, and the retry's replay sends it again — for as long as the user has no way to sign
+ *       in, which is also why a replay of a create long finished sends nothing.
  * </ol>
  *
  * <p>What this cannot heal on its own is a Keycloak user orphaned by a lost race for the same
@@ -59,12 +73,20 @@ public class EndUserService {
 
     private static final Logger log = LoggerFactory.getLogger(EndUserService.class);
 
+    /** How many Keycloak users one search reads at a time. */
+    private static final int SEARCH_BATCH = 100;
+
+    /** How many batches one search page reads at most, filled or not. */
+    private static final int SEARCH_BATCHES = 5;
+
     private final AccountRepository accounts;
     private final KeycloakUsers keycloak;
+    private final Duration emailLinkLifespan;
 
-    EndUserService(AccountRepository accounts, KeycloakUsers keycloak) {
+    EndUserService(AccountRepository accounts, KeycloakUsers keycloak, AuthProperties properties) {
         this.accounts = accounts;
         this.keycloak = keycloak;
+        this.emailLinkLifespan = properties.userManagement().emailLinkLifespan();
     }
 
     /**
@@ -81,15 +103,15 @@ public class EndUserService {
         }
 
         keycloak.requireAccountIdEditableByAdminsOnly();
+        requireEmailDelivery();
 
         UUID accountId = UUID.randomUUID();
-        Optional<UUID> created = keycloak.create(new NewKeycloakUser(
+        Optional<UUID> created = keycloak.create(NewKeycloakUser.endUser(
                 command.getUsername(),
                 command.getEmail(),
                 command.getFirstName().orElse(null),
                 command.getLastName().orElse(null),
                 command.isEmailVerified(),
-                command.getTemporaryPassword().orElse(null),
                 accountId));
 
         UUID subject;
@@ -109,6 +131,7 @@ public class EndUserService {
         Account account = AccountService.toDomain(
                 accounts.insert(accountId, subject, command.getExternalRef(), AccountStatus.ACTIVE.name()));
         keycloak.grantRealmRole(subject, END_USER);
+        sendSetPasswordLink(accountId, subject);
         return account;
     }
 
@@ -119,6 +142,69 @@ public class EndUserService {
         return keycloak.findById(subject)
                 .map(EndUserService::toIdentity)
                 .orElseThrow(() -> identityNotFound(accountId));
+    }
+
+    /**
+     * End users matching a search, a page at a time, in username order — answered from Keycloak,
+     * where the identity lives (ADR-014 §4), and joined to the accounts in one query per batch.
+     *
+     * <p>Keycloak's list holds staff too, and users with no account; neither is an end user here, so
+     * a page is filled by reading on past them. That is why a page can hold fewer than
+     * {@code limit} users and still not be the last: one page reads at most {@value #SEARCH_BATCHES}
+     * batches of {@value #SEARCH_BATCH}, so a long run of staff costs a short page rather than a slow
+     * one. Closed accounts are not found — their identity was erased with them.
+     */
+    @PreAuthorize(AccountAccess.READ)
+    public Slice<EndUser> search(EndUserQuery query, int position, int limit) {
+        List<EndUser> found = new ArrayList<>();
+        int next = position;
+        for (int batch = 0; batch < SEARCH_BATCHES; batch++) {
+            List<KeycloakUser> users = keycloak.search(
+                    query.getText().orElse(null),
+                    query.getEmail().orElse(null),
+                    query.getUsername().orElse(null),
+                    next,
+                    SEARCH_BATCH);
+            boolean lastBatch = users.size() < SEARCH_BATCH;
+            Map<UUID, AccountRow> anchors = accounts.findByKeycloakSubs(users.stream().map(KeycloakUser::id).toList())
+                    .stream()
+                    .collect(Collectors.toMap(AccountRow::getKeycloakSub, Function.identity()));
+            for (int i = 0; i < users.size(); i++) {
+                KeycloakUser user = users.get(i);
+                next++;
+                AccountRow anchor = anchors.get(user.id());
+                if (anchor == null) {
+                    continue;
+                }
+                found.add(new EndUser(AccountService.toDomain(anchor), toIdentity(user)));
+                if (found.size() == limit) {
+                    boolean listEnded = lastBatch && i == users.size() - 1;
+                    return new Slice<>(found, listEnded ? null : next);
+                }
+            }
+            if (lastBatch) {
+                return new Slice<>(found, null);
+            }
+        }
+        return new Slice<>(found, next);
+    }
+
+    /**
+     * Email the user a link to set a new password. For a forgotten password, and for an invitation
+     * that went astray or expired: the email is the same either way, and so is what the user does
+     * with it. No password passes through this service, and the user's current one keeps working
+     * until they set the new one.
+     */
+    @PreAuthorize(AccountAccess.USER_ADMIN)
+    public void sendPasswordReset(UUID accountId) {
+        AccountRow row = findRow(accountId);
+        if (AccountStatus.of(row.getStatus()) == AccountStatus.CLOSED) {
+            throw new AccountClosedException(accountId);
+        }
+        UUID subject = linkedSubject(row);
+        requireEmailDelivery();
+        sendSetPasswordLink(accountId, subject);
+        log.info("Sent account {} a link to set a new password", accountId);
     }
 
     /**
@@ -143,7 +229,7 @@ public class EndUserService {
             return toIdentity(current);
         }
 
-        switch (keycloak.update(subject, email, firstName, lastName)) {
+        switch (keycloak.update(subject, email, firstName, lastName, null)) {
             case UPDATED -> log.info("Updated the identity of account {}", accountId);
             case NOT_FOUND -> throw identityNotFound(accountId);
             case EMAIL_TAKEN -> throw new EmailTakenException();
@@ -228,9 +314,40 @@ public class EndUserService {
         if (account.getStatus() == AccountStatus.CLOSED) {
             throw new AccountClosedException(account.getAccountId());
         }
-        // The attempt being repeated may have stopped between the insert and the grant.
+        // The attempt being repeated may have stopped between the insert and the grant, or before
+        // its invitation went out. A user who can sign in is past needing one, which is what keeps a
+        // replay of a long-finished create from emailing them again. Whether one is owed is decided
+        // first, so a realm without SMTP refuses the repeat before it writes anything, the grant
+        // included.
+        boolean invite = !keycloak.canSignIn(subject);
+        if (invite) {
+            requireEmailDelivery();
+        }
         keycloak.grantRealmRole(subject, END_USER);
+        if (invite) {
+            sendSetPasswordLink(account.getAccountId(), subject);
+        }
         return account;
+    }
+
+    /**
+     * The invitation, or a password reset: Keycloak's email with a link to set a password. Whether
+     * the realm can send email at all is the caller's to check, before it writes anything.
+     */
+    private void sendSetPasswordLink(UUID accountId, UUID subject) {
+        if (!keycloak.sendSetPasswordEmail(subject, emailLinkLifespan)) {
+            throw identityNotFound(accountId);
+        }
+    }
+
+    /**
+     * Refuse before writing anything if the realm cannot send email. Without SMTP, Keycloak fails
+     * the send with a 500 that reads like an outage, after the user and the account already exist.
+     */
+    private void requireEmailDelivery() {
+        if (!keycloak.emailConfigured()) {
+            throw new EmailDeliveryUnavailableException();
+        }
     }
 
     private AccountRow findRow(UUID accountId) {

@@ -36,6 +36,7 @@ class AccountStatements {
     final String findById = read("find-by-id.sql");
     final String findByExternalRef = read("find-by-external-ref.sql");
     final String findByKeycloakSub = read("find-by-keycloak-sub.sql");
+    final String findByKeycloakSubs = read("find-by-keycloak-subs.sql");
     final String updateStatusIfOpen = read("update-status-if-open.sql");
 
     private static String read(String file) {

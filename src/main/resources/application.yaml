@@ -167,6 +167,11 @@ auth:
     # From OpenBao via External Secrets, like the database password. Required in local mode.
     client-secret: ${KEYCLOAK_CLIENT_SECRET:}
     timeout: 5s
+  user-management:
+    # How long the link in an invitation or password-reset email works. Keycloak's own
+    # default for an email an admin triggers is 12 hours, which kills an invitation sent
+    # on a Friday evening before Monday.
+    email-link-lifespan: ${AUTH_EMAIL_LINK_LIFESPAN:72h}
 
 vaullet:
   api:
@@ -177,8 +182,9 @@ vaullet:
     # matches, and it is restated because CORS scope is worth being explicit about.
     cors-path-pattern: /v1/**
     # DELETE arrived with step 4: closing an account and erasing its identity. It is
-    # only answered with auth.provider: local, and CORS is off by default anyway.
-    allowed-methods: GET,POST,PATCH,DELETE
+    # only answered with auth.provider: local, and CORS is off by default anyway. PUT
+    # came with staff management (PUT /v1/staff/{id}/roles).
+    allowed-methods: GET,POST,PUT,PATCH,DELETE
 
   security:
     # What the @PreAuthorize rules in this service ask for. Under the `local` profile

@@ -4,6 +4,12 @@
   "registrationAllowed": false,
   "duplicateEmailsAllowed": false,
   "editUsernameAllowed": false,
+  "smtpServer": {
+    "host": "${SMTP_HOST:mailpit}",
+    "port": "${SMTP_PORT:1025}",
+    "from": "no-reply@test.vaullet.dev",
+    "fromDisplayName": "Vaullet (test)"
+  },
   "roles": {
     "realm": [
       {
@@ -15,11 +21,28 @@
         "description": "Read transactions and balances; move no money"
       },
       {
+        "name": "FRAUD_REVIEWER",
+        "description": "Review cases, freeze and unfreeze accounts"
+      },
+      {
+        "name": "FINANCE",
+        "description": "Approve refunds and manual adjustments"
+      },
+      {
+        "name": "CONFIG_ADMIN",
+        "description": "Limits, campaigns and module configuration"
+      },
+      {
         "name": "SUPER_ADMIN",
         "description": "User and role administration"
       }
     ]
   },
+  "groups": [
+    {
+      "name": "staff"
+    }
+  ],
   "clients": [
     {
       "clientId": "wallet-auth-service",

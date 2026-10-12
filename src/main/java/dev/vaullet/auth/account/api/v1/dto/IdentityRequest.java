@@ -15,9 +15,14 @@ import org.jspecify.annotations.Nullable;
  * presence of one object decides whether an end user is created. ADR-014 §3 makes identity a
  * sub-resource of the account; the body says the same thing.
  *
+ * <p><b>No password.</b> Keycloak emails the new user a link to set their own, so no end user's
+ * password ever passes through Vaullet (ADR-014). An earlier version accepted a temporary one; a
+ * {@code password} still sent is ignored like any other unknown field, and the invitation goes out
+ * regardless.
+ *
  * <p>The checks here are the ones worth failing before Keycloak is called. Keycloak still applies
- * the realm's own user-profile validators and password policy, and a refusal from those comes back
- * as {@code 422 IDENTITY_REJECTED} with Keycloak's reason.
+ * the realm's own user-profile validators, and a refusal from those comes back as
+ * {@code 422 IDENTITY_REJECTED} with Keycloak's reason.
  */
 public final class IdentityRequest {
 
@@ -26,7 +31,6 @@ public final class IdentityRequest {
     private final @Nullable String firstName;
     private final @Nullable String lastName;
     private final boolean emailVerified;
-    private final @Nullable String password;
 
     @JsonCreator(mode = JsonCreator.Mode.PROPERTIES)
     public IdentityRequest(
@@ -34,14 +38,12 @@ public final class IdentityRequest {
             String email,
             @Nullable String firstName,
             @Nullable String lastName,
-            @Nullable Boolean emailVerified,
-            @Nullable String password) {
+            @Nullable Boolean emailVerified) {
         this.username = username;
         this.email = email;
         this.firstName = firstName;
         this.lastName = lastName;
         this.emailVerified = Boolean.TRUE.equals(emailVerified);
-        this.password = password;
     }
 
     /** Keycloak stores it in lower case, and it cannot be changed afterwards through this API. */
@@ -77,23 +79,13 @@ public final class IdentityRequest {
     }
 
     @Schema(example = "false", defaultValue = "false",
-            description = "True only if you have already verified the address yourself, for instance during KYC.")
+            description = "True only if you have already verified the address yourself, for instance during KYC. "
+                    + "Following the invitation link verifies it either way.")
     public boolean isEmailVerified() {
         return emailVerified;
     }
 
-    /**
-     * A first password, set as temporary: Keycloak makes the user choose their own at first login.
-     * Omit it and the user needs a password reset before they can log in.
-     */
-    @Size(min = 8, max = 128)
-    @Schema(accessMode = Schema.AccessMode.WRITE_ONLY, format = "password",
-            description = "Temporary. The user must replace it at first login. Never stored or returned by Vaullet.")
-    public @Nullable String getPassword() {
-        return password;
-    }
-
-    /** Only the username: the rest is personal data, and the password is a credential. */
+    /** Only the username: the rest is personal data. */
     @Override
     public String toString() {
         return "IdentityRequest[username=" + username + "]";
