@@ -30,8 +30,8 @@ This service owns **Vaullet's own record of a user** and brokers everything abou
 
 ```
 ./mvnw spring-boot:run     # PostgreSQL, Keycloak and Mailpit via Compose, Flyway migrates, serves on :8080
-./mvnw test                # 85 unit + architecture tests, no Docker
-./mvnw verify              # adds 104 integration tests on real PostgreSQL and Keycloak
+./mvnw test                # 91 unit + architecture tests, no Docker
+./mvnw verify              # adds 106 integration tests on real PostgreSQL and Keycloak
 ```
 
 Then open <http://localhost:8080/swagger-ui.html>.
@@ -269,6 +269,7 @@ POST   /v1/accounts        {external_ref, identity}
 GET    /v1/accounts/{id}/identity          → 200  from Keycloak, live
 PATCH  /v1/accounts/{id}/identity          → 200  to Keycloak
 POST   /v1/accounts/{id}/password-reset    → 204  Keycloak sends the mail
+                                           | 409 EMAIL_NOT_VERIFIED (can sign in, address unverified)
 GET    /v1/accounts?search=  |  ?email=&username=
                                            → 200  {data, next_cursor}, from Keycloak
 DELETE /v1/accounts/{id}                   → 204  CLOSED here, erased there
@@ -340,6 +341,7 @@ have been technically correct and practically useless: an integrator that gets a
 | `ACCOUNT_CLOSED` | 409 | The account is `CLOSED`, and closure is terminal. A 409 rather than a 404 — the account exists and the caller is entitled to know it exists. |
 | `USERNAME_TAKEN` | 409 | Keycloak has a user with this username that is not this request's own earlier attempt: another end user, a staff member, or someone who registered on Keycloak's pages. |
 | `EMAIL_TAKEN` | 409 | Keycloak has a user with this email address. |
+| `EMAIL_NOT_VERIFIED` | 409 | A password reset for a user who can already sign in and whose email address is unverified. The link would reach whoever owns an address nobody has proved — possibly one set a minute ago with `PATCH …/identity`. |
 | `IDENTITY_REJECTED` | 422 | Keycloak refused a value — the realm's password policy, or a user-profile validator. `detail` carries Keycloak's reason. |
 | `USER_MANAGEMENT_UNAVAILABLE` | 422 | An identity sent to a deployment with `auth.provider: federated`. |
 | `EMAIL_DELIVERY_UNAVAILABLE` | 422 | The realm has no SMTP server, so the invitation or reset email cannot go out. Checked before anything is written. |
@@ -666,8 +668,12 @@ finished emails nobody. Details in `EndUserService`.
 
 `GET`/`PATCH /v1/accounts/{id}/identity` read and change the Keycloak user; nothing is stored here.
 `POST /v1/accounts/{id}/password-reset` sends the same email again, for a forgotten password or an
-invitation that expired. `DELETE /v1/accounts/{id}` closes the account and deletes the Keycloak
-user. `account_id` and everything keyed to it stay.
+invitation that expired. Once the user can sign in, it goes only to a verified address and answers
+`409 EMAIL_NOT_VERIFIED` otherwise: `PATCH …/identity` sets addresses nobody has proved yet, and
+changing the address and then sending a reset would hand the account to whoever owns the new one. A
+user who cannot sign in yet still gets it — for them it is the invitation again. `DELETE
+/v1/accounts/{id}` closes the account and deletes the Keycloak user. `account_id` and everything
+keyed to it stay.
 
 **Search** is `GET /v1/accounts`. `?search=` is Keycloak's free text — a prefix of the username, the
 email address or a name, with `*` as a wildcard — while `?email=` and `?username=` are exact, and the
@@ -732,7 +738,9 @@ writes that is not enough — a `SUPER_ADMIN` demoted or disabled a minute ago c
 their token's life to make themselves a way back in — so each write also asks Keycloak whether the
 caller is, now, an enabled member of the `staff` group holding `SUPER_ADMIN`, and answers
 `403 ACCESS_DENIED` if not. A token without a usable `sub` is refused the same way: the client
-behind the dashboard needs Keycloak's `basic` client scope, which is where `sub` comes from.
+behind the dashboard needs Keycloak's `basic` client scope, which is where `sub` comes from. So is
+any caller that is not a Keycloak token at all, the local profile's anonymous one aside — an
+authentication that cannot say who its holder is must not switch these checks off.
 
 **Nobody administers themselves.** Changing your own roles, disabling yourself and deleting yourself
 answer `403 SELF_CHANGE_FORBIDDEN` — separation of duties: a `SUPER_ADMIN` must not be able to grant

@@ -7,6 +7,7 @@ import dev.vaullet.auth.account.dao.KeycloakUsers.KeycloakUser;
 import dev.vaullet.auth.account.dao.KeycloakUsers.NewKeycloakUser;
 import dev.vaullet.auth.common.error.exception.AccountClosedException;
 import dev.vaullet.auth.common.error.exception.EmailDeliveryUnavailableException;
+import dev.vaullet.auth.common.error.exception.EmailNotVerifiedException;
 import dev.vaullet.auth.common.error.exception.EmailTakenException;
 import dev.vaullet.auth.common.error.exception.ExternalRefTakenException;
 import dev.vaullet.auth.common.error.exception.IdentityAlreadyLinkedException;
@@ -194,6 +195,14 @@ public class EndUserService {
      * that went astray or expired: the email is the same either way, and so is what the user does
      * with it. No password passes through this service, and the user's current one keeps working
      * until they set the new one.
+     *
+     * <p><b>Only to a verified address, once the user can sign in.</b> The link is the account to
+     * whoever reads that inbox, and {@link #updateIdentity} sets addresses nobody has proved yet —
+     * so without this rule, changing the address and then asking for a reset would take over any
+     * user, by anyone allowed to do both, including a {@code SUPER_ADMIN} whose role was taken away
+     * after their token was issued. Refused with {@code EMAIL_NOT_VERIFIED} before anything is sent.
+     * A user who cannot sign in yet has no login to take; for them the link is the invitation, sent
+     * again, and their address may well be unverified — refusing would leave no way to resend it.
      */
     @PreAuthorize(AccountAccess.USER_ADMIN)
     public void sendPasswordReset(UUID accountId) {
@@ -203,6 +212,12 @@ public class EndUserService {
         }
         UUID subject = linkedSubject(row);
         requireEmailDelivery();
+        KeycloakUser user = keycloak.findById(subject).orElseThrow(() -> identityNotFound(accountId));
+        if (!user.emailVerified() && keycloak.canSignIn(subject)) {
+            log.warn("Refused a password reset for account {}: it can sign in and its email address is unverified",
+                    accountId);
+            throw new EmailNotVerifiedException(accountId);
+        }
         sendSetPasswordLink(accountId, subject);
         log.info("Sent account {} a link to set a new password", accountId);
     }

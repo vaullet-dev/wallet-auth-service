@@ -66,10 +66,12 @@ class EndUserController {
     @Operation(
             summary = "Email the user a link to set a new password",
             description = "For a forgotten password, and to send an invitation again. The password is set on "
-                    + "Keycloak's page and never passes through Vaullet; the current one works until then.")
+                    + "Keycloak's page and never passes through Vaullet; the current one works until then. "
+                    + "Once the user can sign in, the link goes only to a verified email address.")
     @ApiResponse(responseCode = "204", description = "Sent")
     @ApiResponse(responseCode = "404", description = "RESOURCE_NOT_FOUND — no such account, or it has no identity")
-    @ApiResponse(responseCode = "409", description = "ACCOUNT_CLOSED")
+    @ApiResponse(responseCode = "409", description = "ACCOUNT_CLOSED | EMAIL_NOT_VERIFIED — the user can sign in "
+            + "and their address is unverified, so the link could reach someone else")
     @ApiResponse(responseCode = "422", description = "EMAIL_DELIVERY_UNAVAILABLE — the realm has no SMTP server")
     @ApiResponse(responseCode = "503", description = "UPSTREAM_UNAVAILABLE — Keycloak or its mail server did not answer")
     void sendPasswordReset(@PathVariable UUID id) {

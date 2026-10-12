@@ -120,6 +120,21 @@ public enum AuthErrorType implements ErrorType {
             "email-delivery-unavailable", HttpStatus.valueOf(422), "Email delivery is not configured"),
 
     /**
+     * A password reset was asked for a user who can already sign in, and their email address is
+     * unverified.
+     *
+     * <p>A reset link hands the account to whoever reads that inbox. An address the user has not
+     * proved is, by definition, one nobody has shown they own — it may be a typo, or the address an
+     * administrator set a minute ago with {@code PATCH …/identity}, which would make "change the
+     * address, then send a reset" a way into somebody else's wallet. So once there is a login to
+     * take over, the link goes only to a verified address.
+     *
+     * <p>A 409: the same request succeeds once the address is verified. A user who cannot sign in
+     * yet is not refused — for them the link is their invitation, sent again.
+     */
+    EMAIL_NOT_VERIFIED("email-not-verified", HttpStatus.CONFLICT, "Email address not verified"),
+
+    /**
      * Staff may not change their own roles, disable themselves or delete themselves.
      *
      * <p>Separation of duties is the reason (ADR-006): a {@code SUPER_ADMIN} who could grant

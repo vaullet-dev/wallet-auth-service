@@ -38,6 +38,9 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.AuthorityUtils;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
@@ -149,6 +152,41 @@ class StaffServiceTest {
             assertThatThrownBy(() -> service.replaceRoles(ID, Set.of(StaffRole.FINANCE)))
                     .isInstanceOf(AccessDeniedException.class);
             verifyNoInteractions(keycloak);
+        }
+
+        @Test
+        @DisplayName("an authentication that is not a Keycloak token is refused, SUPER_ADMIN or not")
+        void not_a_keycloak_token() {
+            SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated(
+                    CALLER.toString(), null, AuthorityUtils.createAuthorityList("ROLE_SUPER_ADMIN")));
+
+            assertThatThrownBy(() -> service.replaceRoles(CALLER, Set.of(StaffRole.FINANCE)))
+                    .isInstanceOf(AccessDeniedException.class);
+            verifyNoInteractions(keycloak);
+        }
+
+        @Test
+        @DisplayName("so is no authentication at all")
+        void no_authentication() {
+            SecurityContextHolder.clearContext();
+
+            assertThatThrownBy(() -> service.delete(ID)).isInstanceOf(AccessDeniedException.class);
+            verifyNoInteractions(keycloak);
+        }
+
+        @Test
+        @DisplayName("the local profile's anonymous caller is no realm user, so neither the self-rules nor the live check apply")
+        void local_profile_anonymous() {
+            SecurityContextHolder.getContext().setAuthentication(new AnonymousAuthenticationToken(
+                    "local", "anonymousUser", AuthorityUtils.createAuthorityList("ROLE_SUPER_ADMIN")));
+            when(keycloak.findById(ID)).thenReturn(Optional.of(user(ID, EMAIL, true)));
+            when(keycloak.isStaff(ID)).thenReturn(true);
+            when(keycloak.delete(ID)).thenReturn(true);
+
+            service.delete(ID);
+
+            verify(keycloak).delete(ID);
+            verify(keycloak, never()).effectiveRealmRoles(any());
         }
     }
 

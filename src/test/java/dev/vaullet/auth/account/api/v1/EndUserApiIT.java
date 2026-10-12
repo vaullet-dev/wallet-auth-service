@@ -23,12 +23,14 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.JwtRequestPostProcessor;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.client.RestClient;
 
 /**
  * End users through the whole stack, in local mode: filter chain, authorisation, validation, the
@@ -85,27 +87,62 @@ class EndUserApiIT {
     }
 
     private static String body(Person person) {
+        return body(person, false);
+    }
+
+    private static String body(Person person, boolean emailVerified) {
         return """
                 {
                   "external_ref": "%s",
                   "identity": {
                     "username": "%s",
                     "email": "%s",
+                    "email_verified": %s,
                     "first_name": "Jane",
                     "last_name": "Doe"
                   }
-                }""".formatted(person.ref(), person.username(), person.email());
+                }""".formatted(person.ref(), person.username(), person.email(), emailVerified);
     }
 
     /** Creates an end user and returns the account id, from the Location header. */
     private String create(Person person) throws Exception {
+        return create(person, false);
+    }
+
+    private String create(Person person, boolean emailVerified) throws Exception {
         String location = mvc.perform(post("/v1/accounts").with(superAdmin())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(body(person)))
+                        .content(body(person, emailVerified)))
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getHeader("Location");
         assertThat(location).isNotNull();
         return location.substring(location.lastIndexOf('/') + 1);
+    }
+
+    /**
+     * Gives the user a password, as following the invitation would: from now on they can sign in.
+     * Straight through Keycloak's Admin API with the service's own client, because no endpoint here
+     * ever takes a password.
+     */
+    private void setPassword(String username) {
+        UUID id = keycloak.findByUsername(username).orElseThrow().id();
+        RestClient client = RestClient.create(KeycloakTestContainer.url());
+        String token = JsonPath.read(client.post()
+                .uri("/realms/{realm}/protocol/openid-connect/token", KeycloakTestContainer.REALM)
+                .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                .body("grant_type=client_credentials&client_id=" + KeycloakTestContainer.CLIENT_ID
+                        + "&client_secret=" + KeycloakTestContainer.CLIENT_SECRET)
+                .retrieve()
+                .body(String.class), "$.access_token");
+        client.put()
+                .uri("/admin/realms/{realm}/users/{id}/reset-password", KeycloakTestContainer.REALM, id)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body("""
+                        {"type": "password", "value": "Signed-in-123", "temporary": false}""")
+                .retrieve()
+                .toBodilessEntity();
+        assertThat(keycloak.canSignIn(id)).isTrue();
     }
 
     @Nested
@@ -391,7 +428,7 @@ class EndUserApiIT {
     class PasswordReset {
 
         @Test
-        @DisplayName("emails the link to set a new password")
+        @DisplayName("emails the link again to a user who cannot sign in yet, verified address or not")
         void sends() throws Exception {
             Person person = Person.fresh();
             String id = create(person);
@@ -401,6 +438,42 @@ class EndUserApiIT {
 
             // The invitation, then the reset.
             assertThat(SmtpSink.messagesTo(person.email())).hasSize(2);
+        }
+
+        @Test
+        @DisplayName("emails a user who can sign in, at their verified address")
+        void sends_to_a_verified_address() throws Exception {
+            Person person = Person.fresh();
+            String id = create(person, true);
+            setPassword(person.username());
+
+            mvc.perform(post("/v1/accounts/{id}/password-reset", id).with(superAdmin()))
+                    .andExpect(status().isNoContent());
+
+            assertThat(SmtpSink.messagesTo(person.email())).hasSize(2);
+        }
+
+        @Test
+        @DisplayName("refuses once the address is changed: the link would reach whoever owns the new one")
+        void refuses_a_changed_address() throws Exception {
+            Person person = Person.fresh();
+            String id = create(person, true);
+            setPassword(person.username());
+            String other = "other-" + person.email();
+
+            mvc.perform(patch("/v1/accounts/{id}/identity", id).with(superAdmin())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"email": "%s"}""".formatted(other)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.email_verified", is(false)));
+
+            mvc.perform(post("/v1/accounts/{id}/password-reset", id).with(superAdmin()))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.code", is("EMAIL_NOT_VERIFIED")));
+
+            assertThat(SmtpSink.messagesTo(other)).isEmpty();
+            assertThat(SmtpSink.messagesTo(person.email())).hasSize(1);
         }
 
         @Test
