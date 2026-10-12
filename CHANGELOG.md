@@ -1,3 +1,9 @@
+## [0.11.0](https://github.com/vaullet-dev/wallet-auth-service/compare/v0.10.0...v0.11.0) (2026-10-12)
+
+### Features
+
+* deploy end user CRUD ([8218113](https://github.com/vaullet-dev/wallet-auth-service/commit/8218113191a28125a3cf583dc4b4ff668d1831d6))
+
 ## [0.10.0](https://github.com/vaullet-dev/wallet-auth-service/compare/v0.9.0...v0.10.0) (2026-10-10)
 
 ### Features
