@@ -34,7 +34,8 @@ This service owns **Vaullet's own record of a user** and brokers everything abou
 ./mvnw verify              # adds 106 integration tests on real PostgreSQL and Keycloak
 ```
 
-Then open <http://localhost:8080/swagger-ui.html>.
+Then open <http://localhost:8080/swagger-ui.html>, or the collection in [`bruno/`](bruno) — see
+[Calling it by hand](#calling-it-by-hand).
 
 In IntelliJ the run menu offers the same thing in two ready-made configurations, checked in under
 `.run/`. Both need Docker running: **auth-service local (compose)** starts PostgreSQL and Keycloak
@@ -66,6 +67,7 @@ a page, with the full component map, a worked account creation, and every field'
 - [The two identity modes](#the-two-identity-modes)
 - [The map](#the-map)
 - [The API](#the-api)
+- [Calling it by hand](#calling-it-by-hand)
 - [The schema](#the-schema)
 - [Creating an account](#creating-an-account)
 - […and the ledger's account row](#and-the-ledgers-account-row)
@@ -350,6 +352,28 @@ have been technically correct and practically useless: an integrator that gets a
 Neither `IDENTITY_ALREADY_LINKED`'s message nor `EXTERNAL_REF_TAKEN`'s names the *other* account. A
 caller holding one identifier should not learn another from an error body; that is a cross-system
 lookup nobody granted them.
+
+---
+
+## Calling it by hand
+
+[`bruno/`](bruno) is a [Bruno](https://www.usebruno.com) collection of every endpoint, kept in this
+repository so a request changes in the same pull request as its endpoint. It is in Bruno's YAML
+format, which needs Bruno 3.1 or later: *Open Collection* on the folder.
+
+| Environment | Base URL | Sign-in |
+| --- | --- | --- |
+| `local` | `http://localhost:8080` | None. The `local` profile runs every request as the anonymous principal with the scopes and roles the rules ask for, and the environment's empty OAuth2 URLs keep Bruno from asking for a token. Mail lands in Mailpit. |
+| `prod` | `https://vaullet.dev/api/auth` | The first request opens Keycloak's sign-in page through the demo client `bruno` (authorization code with PKCE). Sign in as staff with `SUPER_ADMIN`, e.g. `test-super-admin`, whose password is in OpenBao at `kv/keycloak/test-users`. |
+
+Before creating anyone in `prod`, set the environment's three secret variables: `end_user_email`
+(where the invitation goes), `staff_email` and `staff_temporary_password`. Bruno keeps secret values
+on the machine and out of the files, so neither a password nor a personal address reaches git.
+
+*Create staff member* keeps `staff_id`, and *Create end user* keeps `account_id` and `external_ref`,
+for the requests under them: a folder run top to bottom creates, reads, changes and removes one user.
+Every request asserts its status, so `bru run --env local` in `bruno/` (the CLI, `@usebruno/cli`)
+checks a local run end to end. The CLI cannot do the browser sign-in, so it is for `local` only.
 
 ---
 

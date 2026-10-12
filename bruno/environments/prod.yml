@@ -1,0 +1,20 @@
+name: prod
+variables:
+  - name: base_url
+    value: https://vaullet.dev/api/auth
+    description: The gateway route to auth-service; the prefix is stripped before the service.
+  - name: oauth2_authorization_url
+    value: https://vaullet.dev/auth/realms/vaullet/protocol/openid-connect/auth
+    description: Keycloak realm vaullet, client bruno.
+  - name: oauth2_token_url
+    value: https://vaullet.dev/auth/realms/vaullet/protocol/openid-connect/token
+    description: Keycloak realm vaullet.
+  - secret: true
+    name: end_user_email
+    description: Where Create end user sends the invitation. A real inbox you can read.
+  - secret: true
+    name: staff_email
+    description: The new staff member's address.
+  - secret: true
+    name: staff_temporary_password
+    description: What Create staff member hands over; replaced at their first sign-in. 8 to 128 characters.

@@ -1,0 +1,20 @@
+name: local
+variables:
+  - name: base_url
+    value: http://localhost:8080
+    description: ./mvnw spring-boot:run, with Compose's PostgreSQL, Keycloak and Mailpit.
+  - name: oauth2_authorization_url
+    value: ""
+    description: "Empty on purpose: the local profile needs no token, and an empty URL keeps Bruno from asking for one."
+  - name: oauth2_token_url
+    value: ""
+    description: Empty on purpose, like oauth2_authorization_url.
+  - name: end_user_email
+    value: jane.doe@example.com
+    description: "Any address: Mailpit catches every mail, http://localhost:58025."
+  - name: staff_email
+    value: ana@operator.example
+    description: "Any address: Mailpit catches every mail."
+  - name: staff_temporary_password
+    value: Local-only-1
+    description: Throwaway, like the rest of the Compose stack.

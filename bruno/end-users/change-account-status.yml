@@ -1,0 +1,30 @@
+info:
+  name: Change account status
+  type: http
+  seq: 8
+
+http:
+  method: PATCH
+  url: "{{base_url}}/v1/accounts/{{account_id}}"
+  body:
+    type: json
+    data: |-
+      {
+        "status": "SUSPENDED"
+      }
+  auth: inherit
+
+runtime:
+  assertions:
+    - expression: res.status
+      operator: eq
+      value: "200"
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+  forwardAuthorizationHeader: true
+
+docs: "`ACTIVE`, `SUSPENDED` (the fraud freeze) or `CLOSED`, which is terminal."

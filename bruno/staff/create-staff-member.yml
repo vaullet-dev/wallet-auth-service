@@ -1,0 +1,48 @@
+info:
+  name: Create staff member
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: "{{base_url}}/v1/staff"
+  body:
+    type: json
+    data: |-
+      {
+        "username": "ana.support",
+        "email": "{{staff_email}}",
+        "first_name": "Ana",
+        "last_name": "Kovač",
+        "roles": [
+          "SUPPORT_AGENT"
+        ],
+        "temporary_password": "{{staff_temporary_password}}"
+      }
+  auth: inherit
+
+runtime:
+  scripts:
+    - type: after-response
+      code: |-
+        if (res.status === 201) {
+          bru.setVar("staff_id", res.body.staff_id);
+        }
+  assertions:
+    - expression: res.status
+      operator: eq
+      value: "201"
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+  forwardAuthorizationHeader: true
+
+docs: |-
+  Creates the user in group `staff` with a temporary password. At first sign-in they choose their own
+  and set up an authenticator app.
+
+  Repeating the request returns the same staff member. Keeps `staff_id` for the requests below.
+  Roles: `SUPPORT_AGENT`, `FRAUD_REVIEWER`, `FINANCE`, `CONFIG_ADMIN`, `SUPER_ADMIN`.

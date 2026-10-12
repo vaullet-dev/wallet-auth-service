@@ -1,0 +1,15 @@
+info:
+  name: Staff
+  type: folder
+  seq: 1
+
+request:
+  auth: inherit
+
+docs:
+  content: |-
+    Staff members of realm `vaullet`: users in group `staff`, with staff roles.
+
+    Every request here needs `SUPER_ADMIN` and the `identity:read` or `identity:admin` scope. Nobody
+    changes their own roles, switches themselves off or deletes themselves (`403 SELF_CHANGE_FORBIDDEN`).
+  type: text/markdown

@@ -1,0 +1,15 @@
+info:
+  name: End users
+  type: folder
+  seq: 2
+
+request:
+  auth: inherit
+
+docs:
+  content: |-
+    End users: an account here and an identity in Keycloak (local identity mode).
+
+    Creating, changing and closing need `identity:admin`, reading needs `identity:read`, and both need a
+    staff role. Signed in as `test-super-admin`, everything here is allowed.
+  type: text/markdown

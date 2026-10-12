@@ -1,0 +1,31 @@
+info:
+  name: Change identity
+  type: http
+  seq: 6
+
+http:
+  method: PATCH
+  url: "{{base_url}}/v1/accounts/{{account_id}}/identity"
+  body:
+    type: json
+    data: |-
+      {
+        "first_name": "Jane",
+        "last_name": "Doe-Smith"
+      }
+  auth: inherit
+
+runtime:
+  assertions:
+    - expression: res.status
+      operator: eq
+      value: "200"
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+  forwardAuthorizationHeader: true
+
+docs: Email address and names. Omitted fields stay as they are; a new address is marked unverified.
