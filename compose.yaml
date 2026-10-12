@@ -59,6 +59,8 @@ services:
       - '${KEYCLOAK_HOST_PORT:-58080}:8080'
     volumes:
       - ./src/test/resources/keycloak:/opt/keycloak/data/import:ro
+    depends_on:
+      - mailpit
     healthcheck:
       # The realm answers only once the import has finished, the same signal
       # KeycloakTestContainer waits for. The image has no curl, so bash's /dev/tcp asks.
@@ -66,3 +68,13 @@ services:
       interval: 5s
       timeout: 3s
       retries: 36
+
+  mailpit:
+    # Where Keycloak's mail goes on this laptop. The realm names its SMTP server
+    # ${SMTP_HOST:mailpit}:${SMTP_PORT:1025}, so with nothing set it lands here: every
+    # invitation and password reset this service asks for is in the inbox at
+    # http://localhost:58025/, links included. Keycloak reaches it inside the Compose
+    # network, so only the web inbox is published.
+    image: axllent/mailpit:v1.31.4
+    ports:
+      - '${MAILPIT_HOST_PORT:-58025}:8025'

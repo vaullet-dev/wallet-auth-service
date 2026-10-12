@@ -21,14 +21,17 @@ This service owns **Vaullet's own record of a user** and brokers everything abou
 > **Local mode is the default, and the one being built:** Vaullet keeps the users, in its own
 > Keycloak realm. The account anchor (step 1) and end users — create with an identity,
 > `GET`/`PATCH …/identity`, `DELETE` (the first part of step 4) — are written, tested and live at
-> `vaullet.dev/api/auth`. Federated mode, where an operator's identity provider holds the users, is
-> deferred; step 1 alone never completed it, because nothing links a federated user to its account
-> yet. Read [Build order](#build-order) for what exists.
+> `vaullet.dev/api/auth`. **Admin user management** (#29) — staff under `/v1/staff`, end users
+> invited by email, search and password reset — is written and tested; it needs the realm's `staff`
+> group (gitops#23) and, for anything that sends email, an SMTP server (gitops#20). Federated mode,
+> where an operator's identity provider holds the users, is deferred; step 1 alone never completed
+> it, because nothing links a federated user to its account yet. Read [Build order](#build-order)
+> for what exists.
 
 ```
-./mvnw spring-boot:run     # PostgreSQL and Keycloak via Compose, Flyway migrates, serves on :8080
-./mvnw test                # 19 unit + architecture tests, no Docker          (~1s)
-./mvnw verify              # adds 26 integration tests on real PostgreSQL     (~5s)
+./mvnw spring-boot:run     # PostgreSQL, Keycloak and Mailpit via Compose, Flyway migrates, serves on :8080
+./mvnw test                # 85 unit + architecture tests, no Docker
+./mvnw verify              # adds 104 integration tests on real PostgreSQL and Keycloak
 ```
 
 Then open <http://localhost:8080/swagger-ui.html>.
@@ -39,7 +42,9 @@ from `compose.yaml`, like `spring-boot:run`, and **auth-service local (testconta
 throwaway ones through Testcontainers. Both run the `local` profile, so no token is needed, and both
 debug like any other run configuration. Keycloak has the test realm imported, so the end-user
 endpoints work locally too; its admin console is at <http://localhost:58080/admin/> (admin/admin)
-for the Compose one.
+for the Compose one. The mail it sends — invitations, password resets — lands in Mailpit at
+<http://localhost:58025/> for the Compose run; under Testcontainers it goes to an in-JVM sink that
+logs each message with its link.
 
 Locally it is plain HTTP. If the browser shows `ERR_SSL_PROTOCOL_ERROR`, it went to
 `https://localhost:8080`, usually because it remembered `https://` from another local app: type
@@ -66,6 +71,8 @@ a page, with the full component map, a worked account creation, and every field'
 - […and the ledger's account row](#and-the-ledgers-account-row)
 - [The account status, and the freeze path](#the-account-status-and-the-freeze-path)
 - [Security](#security)
+- [End users (local mode)](#end-users-local-mode)
+- [Staff (local mode)](#staff-local-mode)
 - [Package structure](#package-structure)
 - [Build order](#build-order)
 - [Deliberate differences from the ledger](#deliberate-differences-from-the-ledger)
@@ -256,14 +263,30 @@ PATCH  /v1/accounts/{id}   {status}        → 200  ACTIVE | SUSPENDED | CLOSED
                                            | 409 ACCOUNT_CLOSED | 404
 
 ── step 4, local identity mode only ────────────────────────────────────────
+POST   /v1/accounts        {external_ref, identity}
+                                           → 201, and Keycloak emails the invitation
+                                           | 422 EMAIL_DELIVERY_UNAVAILABLE (no SMTP; nothing created)
 GET    /v1/accounts/{id}/identity          → 200  from Keycloak, live
 PATCH  /v1/accounts/{id}/identity          → 200  to Keycloak
-POST   /v1/accounts/{id}/password-reset    → 202  Keycloak sends the mail
-GET    /v1/accounts/{id}/roles             → 200  realm roles
-PUT    /v1/accounts/{id}/roles             → 200
-GET    /v1/accounts?email=&status=         → 200  Keycloak's search, intersected
+POST   /v1/accounts/{id}/password-reset    → 204  Keycloak sends the mail
+GET    /v1/accounts?search=  |  ?email=&username=
+                                           → 200  {data, next_cursor}, from Keycloak
 DELETE /v1/accounts/{id}                   → 204  CLOSED here, erased there
+
+── staff, local identity mode only (#29) ───────────────────────────────────
+POST   /v1/staff           {username, email, first_name, last_name, roles, temporary_password}
+                                           → 201 {staff_id, username, …, roles, enabled}
+GET    /v1/staff                           → 200  {data, next_cursor}
+GET    /v1/staff/{id}                      → 200 | 404 (not staff)
+PATCH  /v1/staff/{id}      {email?, first_name?, last_name?, enabled?}
+                                           → 200 | 403 SELF_CHANGE_FORBIDDEN
+PUT    /v1/staff/{id}/roles {roles}        → 200 | 403 SELF_CHANGE_FORBIDDEN
+DELETE /v1/staff/{id}                      → 204 | 403 SELF_CHANGE_FORBIDDEN
 ```
+
+**Lists** are ADR-011 §8's `{"data": [...], "next_cursor": "..."}`, paged with `?limit=` (1–100,
+default 50) and `?cursor=`. The cursor is opaque. A page can hold fewer items than the limit and
+still not be the last; only a missing `next_cursor` ends the list.
 
 Under `auth.provider: federated` the local-only endpoints return `404 ENDPOINT_NOT_AVAILABLE`, and
 `GET /v1/capabilities` reports `user_management: false` — the mechanism ADR-012 §4 already defines
@@ -306,15 +329,21 @@ Wire conventions, all from ADR-011 §7–8:
 
 ### This service's error codes
 
-Three, alongside the platform codes in `CommonErrorType`. Each exists because `RESOURCE_CONFLICT`
-would have been technically correct and practically useless: an integrator that gets a 409 from
-`POST /v1/accounts` has three different problems to tell apart, and each has a different fix.
+Alongside the platform codes in `CommonErrorType`. Each exists because `RESOURCE_CONFLICT` would
+have been technically correct and practically useless: an integrator that gets a 409 from
+`POST /v1/accounts` has several different problems to tell apart, and each has a different fix.
 
 | Code | Status | Raised when |
 | --- | --- | --- |
 | `EXTERNAL_REF_TAKEN` | 409 | Another account carries this `external_ref` **and a different `keycloak_sub`** — two identities claiming one operator id. A repeat with no contradiction is a retry, not this. |
 | `IDENTITY_ALREADY_LINKED` | 409 | Another account is already linked to this `keycloak_sub`. Guards the failure ADR-006 names: a subject collision after an IdP migration, producing two accounts for one person and splitting their balance. |
 | `ACCOUNT_CLOSED` | 409 | The account is `CLOSED`, and closure is terminal. A 409 rather than a 404 — the account exists and the caller is entitled to know it exists. |
+| `USERNAME_TAKEN` | 409 | Keycloak has a user with this username that is not this request's own earlier attempt: another end user, a staff member, or someone who registered on Keycloak's pages. |
+| `EMAIL_TAKEN` | 409 | Keycloak has a user with this email address. |
+| `IDENTITY_REJECTED` | 422 | Keycloak refused a value — the realm's password policy, or a user-profile validator. `detail` carries Keycloak's reason. |
+| `USER_MANAGEMENT_UNAVAILABLE` | 422 | An identity sent to a deployment with `auth.provider: federated`. |
+| `EMAIL_DELIVERY_UNAVAILABLE` | 422 | The realm has no SMTP server, so the invitation or reset email cannot go out. Checked before anything is written. |
+| `SELF_CHANGE_FORBIDDEN` | 403 | A staff member changing their own roles, disabling themselves or deleting themselves. |
 
 Neither `IDENTITY_ALREADY_LINKED`'s message nor `EXTERNAL_REF_TAKEN`'s names the *other* account. A
 caller holding one identifier should not learn another from an error body; that is a cross-system
@@ -563,27 +592,28 @@ in the platform** (ADR-006); this service brokers and never mints. If it ever ne
 handling, something would have gone wrong.
 
 Scopes, for [ADR-008](../architecture/docs/adr/008-service-to-service-authentication.md)'s Layer 3
-table — which does not yet have these rows:
+table, which has the `/v1/accounts/**` rows and still needs `/v1/staff/**` (architecture#2):
 
 | Scope | Covers |
 | --- | --- |
-| `identity:read` | `GET /v1/accounts/**` |
-| `identity:admin` | `POST`, `PATCH`, `PUT`, `DELETE` |
+| `identity:read` | `GET /v1/accounts/**`, `GET /v1/staff/**` |
+| `identity:admin` | `POST`, `PATCH`, `PUT`, `DELETE` on both |
 
 Roles are realm roles from `realm_access.roles`, mapped to `ROLE_*` by `backend-common`'s
 `JwtAuthorityMapper`. **Keycloak assigns them; this service enforces what they mean.**
 
 | Endpoint | Role |
 | --- | --- |
-| `POST /v1/accounts`, the identity sub-resources, `DELETE` | `SUPER_ADMIN` |
+| `POST /v1/accounts`, the identity sub-resources, password reset, `DELETE` | `SUPER_ADMIN` |
 | `PATCH /v1/accounts/{id}` — the freeze | `FRAUD_REVIEWER` |
-| `GET` anything | `SUPPORT_AGENT` and up: every ADR-006 role except `END_USER` |
+| `GET /v1/accounts/**`, search included | `SUPPORT_AGENT` and up: every ADR-006 role except `END_USER` |
+| Everything under `/v1/staff`, reads included | `SUPER_ADMIN` |
 
 **Every rule needs the role, reads included.** A scope says what the client may ask for, not who
 the user is: Keycloak puts a client scope in the token of everyone who signs in through a client it
 is attached to, `END_USER`s included. So `identity:read` on its own admits anyone the client admits,
 and it is the role that says who is asking. Each rule is written once, in `AccountAccess`, and both
-`AccountService` and `EndUserService` use them.
+`AccountService` and `EndUserService` use them; staff management's are in `StaffAccess`.
 
 **The freeze deliberately sits on a different endpoint from user administration.** Two endpoints,
 two roles, two audit streams — ADR-006's separation of duties comes out of the resource layout
@@ -609,22 +639,42 @@ anchor alone, as before.
     "username": "jane.doe",
     "email": "jane.doe@example.com",
     "first_name": "Jane",
-    "last_name": "Doe",
-    "password": "a temporary one, optional"
+    "last_name": "Doe"
   }
 }
 ```
 
+**No password — an invitation.** Keycloak emails the new user a link to set their own password
+(`execute-actions-email` with `UPDATE_PASSWORD`), valid for `auth.user-management.email-link-lifespan`,
+72 hours by default. The password is typed into Keycloak's page, so no end user's password passes
+through this service, and following the link verifies the address as well. An earlier version
+accepted a temporary `password`; one still sent is ignored like any other unknown field.
+
+**Without SMTP, nothing is created.** The realm's SMTP server is checked before the first write, and
+a realm without one answers `422 EMAIL_DELIVERY_UNAVAILABLE`: a user who cannot be invited is a user
+who cannot sign in. Production has no SMTP server until gitops#20 (Mailjet), so until then this
+endpoint refuses end users there.
+
 **The order is what makes a repeat safe.** The account id is minted first and the Keycloak user is
 created carrying it as `account_id`, so the anchor's primary key and the token claim are one value
-from the start. Then the anchor row, which is the commit point, then `END_USER`. A create that died
-between Keycloak and the database is finished by the retry: Keycloak answers 409, and a user with an
-`account_id` and the requested email address is recognised as this request's own. Details in
-`EndUserService`.
+from the start. Then the anchor row, which is the commit point, then `END_USER`, then the invitation.
+A create that died between Keycloak and the database is finished by the retry: Keycloak answers 409,
+and a user with an `account_id` and the requested email address is recognised as this request's own.
+A repeat sends the invitation again for as long as the user has no way to sign in — no password and
+no linked identity provider — so a lost invitation goes out again, and a replay of a create long
+finished emails nobody. Details in `EndUserService`.
 
 `GET`/`PATCH /v1/accounts/{id}/identity` read and change the Keycloak user; nothing is stored here.
-`DELETE /v1/accounts/{id}` closes the account and deletes the Keycloak user. `account_id` and
-everything keyed to it stay.
+`POST /v1/accounts/{id}/password-reset` sends the same email again, for a forgotten password or an
+invitation that expired. `DELETE /v1/accounts/{id}` closes the account and deletes the Keycloak
+user. `account_id` and everything keyed to it stay.
+
+**Search** is `GET /v1/accounts`. `?search=` is Keycloak's free text — a prefix of the username, the
+email address or a name, with `*` as a wildcard — while `?email=` and `?username=` are exact, and the
+two kinds do not mix. It is answered from Keycloak in username order and joined to the accounts a
+batch at a time, each account with its `identity`. Staff and users with no account are skipped, so a
+page can be short without being the last, and closed accounts are not found: their identity went
+with them.
 
 **What the realm must provide** (gitops, `apps/keycloak-config`):
 
@@ -634,9 +684,71 @@ everything keyed to it stay.
   drops the attribute silently; user-editable, a user could change which account their tokens name.
   The service checks this before its first create and refuses to continue otherwise;
 - the client's secret in OpenBao at `kv/wallet-auth/keycloak-client` (`secret`), read here by
-  `k8s/externalsecret-keycloak-client.yaml` and by keycloak-config-cli in the `keycloak` namespace.
+  `k8s/externalsecret-keycloak-client.yaml` and by keycloak-config-cli in the `keycloak` namespace;
+- an SMTP server in the realm, for invitations and resets (gitops#20). Without one those answer
+  `422 EMAIL_DELIVERY_UNAVAILABLE`;
+- the realm group `staff` (gitops#23) and ADR-006's six realm roles, for staff management.
 
 The Admin API is called on Keycloak's in-cluster Service, never through `vaullet.dev/auth`.
+
+---
+
+## Staff (local mode)
+
+The operator's own people — support agents, fraud reviewers, finance, configuration admins and
+super admins — are realm users too, managed under `/v1/staff` for the admin dashboard (#29). They
+live in realm `vaullet` beside the end users, a departure from ADR-006's separate `vaullet-admin`
+realm that architecture#2 records, and they have **no account**: no wallet, so no anchor and no
+`account_id`. A staff member's id is their Keycloak id, which is also the `sub` of their tokens.
+
+```json
+POST /v1/staff
+{
+  "username": "ana.support",
+  "email": "ana@operator.example",
+  "first_name": "Ana",
+  "last_name": "Kovač",
+  "roles": ["SUPPORT_AGENT"],
+  "temporary_password": "set by the admin, replaced at first sign-in"
+}
+```
+
+**Who is staff is a group, not a role.** Every staff member is created in the realm group `staff`,
+in the same Keycloak call that creates the user. Roles cannot be given in that call, so staff marked
+by their roles alone would make a create that stopped half-way produce somebody invisible, holding
+the username. Membership makes them visible from the first write, and a repeat of the create grants
+the roles it missed. Every `/v1/staff` operation refuses a user outside the group, so an end user
+cannot be reached through it — and staff, having no account, cannot be reached through
+`/v1/accounts`.
+
+**First sign-in.** The password is temporary and the member must enrol an authenticator app: Keycloak
+runs `UPDATE_PASSWORD` and `CONFIGURE_TOTP` before it issues them a token, which is ADR-006's MFA for
+every role but `END_USER`. A password grant for such a user answers *Account is not fully set up*;
+the first sign-in happens in a browser.
+
+**The caller is checked in Keycloak, not only in their token.** Everything under `/v1/staff` is
+`SUPER_ADMIN`'s, and `@PreAuthorize` reads the roles a token carried when it was issued. For the
+writes that is not enough — a `SUPER_ADMIN` demoted or disabled a minute ago could use the rest of
+their token's life to make themselves a way back in — so each write also asks Keycloak whether the
+caller is, now, an enabled member of the `staff` group holding `SUPER_ADMIN`, and answers
+`403 ACCESS_DENIED` if not. A token without a usable `sub` is refused the same way: the client
+behind the dashboard needs Keycloak's `basic` client scope, which is where `sub` comes from.
+
+**Nobody administers themselves.** Changing your own roles, disabling yourself and deleting yourself
+answer `403 SELF_CHANGE_FORBIDDEN` — separation of duties: a `SUPER_ADMIN` must not be able to grant
+themselves `FINANCE`. With the live check, whoever removes a `SUPER_ADMIN` is another one who still
+is, so the last cannot be removed; only two removing each other at the same moment could do it.
+Every write is logged with the caller's id, for the audit trail ADR-006 asks of role changes, until
+the Audit service exists to take it.
+
+`PUT /v1/staff/{id}/roles` replaces the set, revoking before granting so a half-finished change leaves
+less access rather than more; it takes effect at the member's next token. `PATCH` with
+`"enabled": false` switches a leaver off and ends their sessions. `DELETE` removes them for good,
+along with the name anything they did was recorded under.
+
+**Not yet guarded:** `/v1/accounts` reaches users only through their account, and staff have none —
+so today an end-user operation cannot touch a staff member. The account at first sign-in (#24) must
+keep it that way by never giving a member of `staff` an account.
 
 ---
 
@@ -649,7 +761,7 @@ ADR-014's order, because each step is independently useful and the first one unb
 | 1 | **The anchor** — migration, DAO, service, `POST`/`GET /v1/accounts`, `by-ref`, `PATCH` status | What both modes stand on. 25 main sources, 45 tests | ✅ **done** 2026-09-17 |
 | 2 | Token validation, the `account_id` protocol mapper, JIT provisioning, and the `identity.account-created.v1` producer | Tokens carry `account_id`; the unlinked anchor gets linked; the ledger gains its `account_balances` row | ⬜ **next** |
 | 3 | Status enforcement and the Redis-cached gateway check | The freeze takes effect | ⬜ |
-| 4 | The Keycloak admin client and the identity sub-resources | Local mode's user management — the facade | 🟡 **end users first** (#17): create with an identity, `GET`/`PATCH …/identity`, `DELETE`. Staff users, roles, password reset and search follow |
+| 4 | The Keycloak admin client and the identity sub-resources | Local mode's user management — the facade | 🟡 **end users** (#17) live: create with an identity, `GET`/`PATCH …/identity`, `DELETE`. **Admin user management** (#29) written and tested: invitations instead of passwords, search, password reset, staff. The account at first sign-in (#24) follows |
 | 5 | `api_clients` and token exchange (RFC 8693) | Operator server-to-server integration | ⬜ |
 
 Nothing else in the platform depends on steps 4 or 5, which is why they are last despite being the
@@ -672,20 +784,29 @@ dev.vaullet.auth
 ├── AuthApplication.java              entry point: @SpringBootApplication and nothing else
 ├── package-info.java                 @NullMarked
 │
-├── common/error/                     this service's share of the error vocabulary
-│   ├── AuthErrorType.java            EXTERNAL_REF_TAKEN, IDENTITY_ALREADY_LINKED, ACCOUNT_CLOSED
-│   ├── AuthApiExceptionHandler.java  the shared advice, plus one DuplicateKeyException backstop
-│   └── exception/                    the concrete throwables
+├── common/
+│   ├── error/                        this service's share of the error vocabulary
+│   │   ├── AuthErrorType.java        the codes in "This service's error codes"
+│   │   ├── AuthApiExceptionHandler.java  the shared advice, plus one DuplicateKeyException backstop
+│   │   └── exception/                the concrete throwables
+│   ├── api/                          what a list looks like on the wire: ListResponse, Cursors,
+│   │                                 PageParameters — part of the API layer by name
+│   └── paging/                       Slice, one page as a service hands it back
 │
-└── account/                          ← the feature slice
-    ├── api/v1/                       controller + dto/ — versioned, because ADR-011 §4 runs v1 and
-    │                                 v2 side by side for twelve months
-    ├── service/                      AccountService, Account, AccountStatus, NewAccount,
-    │                                 validation/ — rules, transactions, authorisation
-    └── dao/                          AccountRepository + AccountStatements — every statement
+├── account/                          ← the feature slice
+│   ├── api/v1/                       controllers + dto/ — versioned, because ADR-011 §4 runs v1 and
+│   │                                 v2 side by side for twelve months
+│   ├── service/                      AccountService, EndUserService, Account, AccountStatus,
+│   │                                 NewAccount, validation/ — rules, transactions, authorisation
+│   └── dao/                          AccountRepository + AccountStatements — every statement — and
+│                                     KeycloakUsers, the Admin API both slices share
+│
+└── staff/                            ← staff management (#29)
+    ├── api/v1/                       StaffController + dto/
+    └── service/                      StaffService, StaffMember, StaffRole — no dao of its own
 ```
 
-**The SQL is not in the Java.** `db/sql/accounts/*.sql` holds the five statements, loaded eagerly at
+**The SQL is not in the Java.** `db/sql/accounts/*.sql` holds the six statements, loaded eagerly at
 startup by `AccountStatements` so a renamed file fails the context rather than an endpoint. The
 reasoning for each one lives in the file with it, which is also where it is useful: SQL comments reach
 the server, so a statement misbehaving in `pg_stat_activity` names its own source file.
@@ -807,6 +928,10 @@ cost: a developer exercises the real `@PreAuthorize` rules, but the *separation*
 roles is not observable by hand. `AccountApiIT` has to assert it with distinct principals — the
 local profile cannot.
 
+`auth.user-management.email-link-lifespan` (`AUTH_EMAIL_LINK_LIFESPAN`, default `72h`) is how long the
+link in an invitation or a password-reset email works. Keycloak's own default for an email an admin
+triggers is 12 hours, which kills an invitation sent on a Friday evening before Monday.
+
 Credentials come from OpenBao through External Secrets
 ([gitops](../gitops)). Nothing in this repository holds one.
 
@@ -826,20 +951,12 @@ small edit somewhere else.
 
 ### Still open
 
-**ADR-008 has no rows for `identity:read` / `identity:admin`.** This is not paperwork. ADR-008's
-scope table is the *source* the mesh policy and the Keycloak client scopes are generated from, so an
-endpoint missing from it is not merely undocumented — it is ungoverned in one direction and
-unreachable in the other:
-
-- **Unreachable:** no Keycloak client is configured to request `identity:admin`, so no real token
-  ever carries it, and `@PreAuthorize("hasAuthority('SCOPE_identity:admin')")` refuses *everyone*.
-  The Admin UI's first call to `POST /v1/accounts` gets a 403 that looks like a bug in this service.
-- **Ungoverned:** whatever the mesh policy is generated from does not know these endpoints exist, so
-  the network rule that should limit who can reach them is absent.
-
-None of it bites during **step 1**, which runs under the `local` profile where the anonymous
-principal is handed both scopes directly. It bites the moment a real token appears, in step 2. Two
-rows, and the same class of omission as **B4** — worth fixing in one pass with it.
+**ADR-008 has the `/v1/accounts/**` rows, but not `/v1/staff/**`** (architecture#2). This is not
+paperwork: ADR-008's scope table is the *source* the mesh policy and the Keycloak client scopes are
+generated from, so an endpoint missing from it is ungoverned — whatever the mesh policy is generated
+from does not know it exists. The scopes themselves are reachable since gitops#12: the demo client
+`bruno` carries `identity:read` and `identity:admin`, which is how these endpoints are tried by hand
+today. The admin dashboard will need a client of its own.
 
 ---
 

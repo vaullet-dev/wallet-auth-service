@@ -3,6 +3,7 @@ package dev.vaullet.auth.account.api.v1.dto;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import org.jspecify.annotations.Nullable;
 
@@ -14,6 +15,12 @@ import org.jspecify.annotations.Nullable;
  * that is a reset, which Keycloak runs so that no password passes through this service.
  */
 public final class UpdateIdentityRequest {
+
+    /**
+     * Present means not blank. Absent leaves a field as it is; an empty string would clear it, and
+     * Bean Validation's {@code @Email} counts an empty string as valid.
+     */
+    private static final String NOT_BLANK = ".*\\S.*";
 
     private final @Nullable String email;
     private final @Nullable String firstName;
@@ -27,18 +34,21 @@ public final class UpdateIdentityRequest {
     }
 
     @Email
+    @Pattern(regexp = NOT_BLANK, message = "must not be blank")
     @Size(max = 255)
     @Schema(example = "jane.doe@example.org", description = "A new address is marked unverified.")
     public @Nullable String getEmail() {
         return email;
     }
 
+    @Pattern(regexp = NOT_BLANK, message = "must not be blank")
     @Size(max = 255)
     @Schema(example = "Jane")
     public @Nullable String getFirstName() {
         return firstName;
     }
 
+    @Pattern(regexp = NOT_BLANK, message = "must not be blank")
     @Size(max = 255)
     @Schema(example = "Doe")
     public @Nullable String getLastName() {

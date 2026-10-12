@@ -25,8 +25,8 @@ import org.springframework.http.HttpStatus;
  * <p>The conflicts are 409 rather than 422: the request is well formed and would be valid against
  * different state. That distinction is the one ADR-011 §7 draws, and it is worth keeping honest —
  * a 422 tells an integrator to fix their payload, which for a conflict would send them looking for a
- * bug that is not in their code. The two 422s below are the cases where the payload <em>is</em> the
- * problem.
+ * bug that is not in their code. The 422s below are the cases where the payload <em>is</em> the
+ * problem, or asks for something this deployment cannot do.
  *
  * <p>Adding an entry is additive and safe. Changing what an existing entry <em>means</em> is a
  * breaking change for every caller that branches on it, and needs a new major API version
@@ -105,7 +105,32 @@ public enum AuthErrorType implements ErrorType {
      * provider (ADR-014 §2). The fix is to send the account without {@code identity}.
      */
     USER_MANAGEMENT_UNAVAILABLE(
-            "user-management-unavailable", HttpStatus.valueOf(422), "User management is not available in this deployment");
+            "user-management-unavailable", HttpStatus.valueOf(422), "User management is not available in this deployment"),
+
+    /**
+     * This deployment cannot send email yet: Keycloak's realm has no SMTP server.
+     *
+     * <p>An end user is invited by email and sets their own password from the link, so none passes
+     * through Vaullet — and an invitation that cannot be sent is a user who cannot sign in. Refused
+     * before anything is written, so nothing was created and the same request succeeds once the
+     * realm has an SMTP server. 422 like {@link #USER_MANAGEMENT_UNAVAILABLE}: a capability this
+     * deployment lacks, which no retry fixes.
+     */
+    EMAIL_DELIVERY_UNAVAILABLE(
+            "email-delivery-unavailable", HttpStatus.valueOf(422), "Email delivery is not configured"),
+
+    /**
+     * Staff may not change their own roles, disable themselves or delete themselves.
+     *
+     * <p>Separation of duties is the reason (ADR-006): a {@code SUPER_ADMIN} who could grant
+     * themselves {@code FINANCE} could approve the very adjustments that role exists to keep apart
+     * from them. Together with the check that a caller is still a {@code SUPER_ADMIN} in Keycloak, it
+     * also means whoever removes one is another who still is, so the last cannot be removed.
+     *
+     * <p>A 403 with a code of its own rather than the platform's {@code ACCESS_DENIED}: the caller
+     * holds the right role, and a dashboard should be able to say why this one target is refused.
+     */
+    SELF_CHANGE_FORBIDDEN("self-change-forbidden", HttpStatus.FORBIDDEN, "Not allowed on your own account");
 
     private final URI type;
     private final HttpStatus status;

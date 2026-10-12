@@ -11,7 +11,7 @@ import org.jspecify.annotations.Nullable;
  * makes an anchor and nothing else; this one makes a Keycloak user and an anchor together, and its
  * natural keys are the operator's reference and the username.
  *
- * <p>{@link #toString()} leaves out the email address, the names and the password. The reference is
+ * <p>{@link #toString()} leaves out the email address and the names. The reference is
  * the operator's own identifier and the one thing a log line needs to find the request again.
  */
 public final class NewEndUser {
@@ -22,7 +22,6 @@ public final class NewEndUser {
     private final @Nullable String firstName;
     private final @Nullable String lastName;
     private final boolean emailVerified;
-    private final @Nullable String temporaryPassword;
 
     public NewEndUser(
             String externalRef,
@@ -30,15 +29,13 @@ public final class NewEndUser {
             String email,
             @Nullable String firstName,
             @Nullable String lastName,
-            boolean emailVerified,
-            @Nullable String temporaryPassword) {
+            boolean emailVerified) {
         this.externalRef = externalRef;
         this.username = username;
         this.email = email;
         this.firstName = firstName;
         this.lastName = lastName;
         this.emailVerified = emailVerified;
-        this.temporaryPassword = temporaryPassword;
     }
 
     public String getExternalRef() {
@@ -66,10 +63,6 @@ public final class NewEndUser {
         return emailVerified;
     }
 
-    /** A first password the user must replace at first login. Empty means none is set here. */
-    public Optional<String> getTemporaryPassword() {
-        return Optional.ofNullable(temporaryPassword);
-    }
 
     @Override
     public String toString() {

@@ -1,6 +1,7 @@
 package dev.vaullet.auth.support;
 
 import java.time.Duration;
+import org.testcontainers.Testcontainers;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.utility.DockerImageName;
@@ -14,6 +15,11 @@ import org.testcontainers.utility.MountableFile;
  * is in the API documentation: a user created without {@code enabled} is disabled, {@code realmRoles}
  * on create is ignored, an undeclared attribute is dropped, and {@code PUT} with an attribute map
  * deletes whatever it leaves out. A stub would only repeat what this codebase already assumes.
+ *
+ * <p>Its mail goes to {@link SmtpSink}, in this JVM. The realm file names the SMTP server as
+ * {@code ${SMTP_HOST:mailpit}} and {@code ${SMTP_PORT:1025}} — Keycloak resolves such placeholders
+ * from its environment at import — so Compose gets its Mailpit by default and this container is
+ * pointed at the sink through Testcontainers' host port forwarding instead.
  *
  * <p>The version is production's (gitops, {@code clusters/prod/keycloak.yaml}), overridable with
  * {@code -Dvaullet.test.keycloak.image=...} for an upgrade test.
@@ -35,6 +41,7 @@ public final class KeycloakTestContainer {
             .withCopyFileToContainer(
                     MountableFile.forClasspathResource("keycloak/vaullet-realm.json"),
                     "/opt/keycloak/data/import/vaullet-realm.json")
+            .withAccessToHost(true)
             .withCommand("start-dev", "--import-realm")
             // The realm's public endpoint answers only once the import has finished.
             .waitingFor(Wait.forHttp("/realms/" + REALM).forPort(8080).forStatusCode(200)
@@ -45,6 +52,12 @@ public final class KeycloakTestContainer {
     /** Keycloak's base URL. Dev mode serves it without the {@code /auth} path production uses. */
     public static synchronized String url() {
         if (!KEYCLOAK.isRunning()) {
+            // Before the start: the host port must be exposed, and the variables set, by the time
+            // Keycloak imports the realm.
+            int smtpPort = SmtpSink.port();
+            Testcontainers.exposeHostPorts(smtpPort);
+            KEYCLOAK.withEnv("SMTP_HOST", "host.testcontainers.internal")
+                    .withEnv("SMTP_PORT", String.valueOf(smtpPort));
             KEYCLOAK.start();
         }
         return "http://" + KEYCLOAK.getHost() + ":" + KEYCLOAK.getMappedPort(8080);

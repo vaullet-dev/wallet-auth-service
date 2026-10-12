@@ -1,9 +1,12 @@
 package dev.vaullet.auth.account.dao;
 
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.Collection;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -16,7 +19,7 @@ import org.springframework.stereotype.Repository;
  * Every statement this service issues against {@code identity_schema}, and nothing else.
  *
  * <p>The SQL itself lives in {@code db/sql/accounts/}, loaded by {@link AccountStatements}. What is
- * left here is the shape: five statements, what each one is called, and how a row becomes an object.
+ * left here is the shape: six statements, what each one is called, and how a row becomes an object.
  *
  * <p>The methods take no decisions. Whether a missing row is an error, which status transitions are
  * allowed, what a repeated natural key means — all of that is {@code AccountService}'s, so the rules
@@ -157,6 +160,21 @@ public class AccountRepository {
 
     public Optional<AccountRow> findByKeycloakSub(UUID keycloakSub) {
         return one(sql.findByKeycloakSub, keycloakSub);
+    }
+
+    /**
+     * The anchors of these Keycloak users, in no particular order. Users without one are simply
+     * missing from the result.
+     */
+    public List<AccountRow> findByKeycloakSubs(Collection<UUID> keycloakSubs) {
+        if (keycloakSubs.isEmpty()) {
+            return List.of();
+        }
+        return jdbc.query(connection -> {
+            PreparedStatement statement = connection.prepareStatement(sql.findByKeycloakSubs);
+            statement.setArray(1, connection.createArrayOf("uuid", keycloakSubs.toArray()));
+            return statement;
+        }, MAPPER);
     }
 
     /**

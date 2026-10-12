@@ -68,12 +68,14 @@ class AccountController {
     @PostMapping
     @Operation(
             summary = "Create an account",
-            description = "Repeating the request with the same external_ref returns the original account "
-                    + "rather than creating a second one, so no Idempotency-Key is needed.")
+            description = "With an identity, this creates an end user too, and Keycloak emails them a link to set "
+                    + "their own password. Repeating the request with the same external_ref returns the original "
+                    + "account rather than creating a second one, so no Idempotency-Key is needed.")
     @ApiResponse(responseCode = "201", description = "Created, or the original account replayed")
     @ApiResponse(responseCode = "409",
             description = "EXTERNAL_REF_TAKEN | IDENTITY_ALREADY_LINKED | ACCOUNT_CLOSED | USERNAME_TAKEN | EMAIL_TAKEN")
-    @ApiResponse(responseCode = "422", description = "IDENTITY_REJECTED | USER_MANAGEMENT_UNAVAILABLE")
+    @ApiResponse(responseCode = "422",
+            description = "IDENTITY_REJECTED | USER_MANAGEMENT_UNAVAILABLE | EMAIL_DELIVERY_UNAVAILABLE")
     @ApiResponse(responseCode = "503", description = "UPSTREAM_UNAVAILABLE — Keycloak did not answer")
     ResponseEntity<AccountResponse> create(
             @Valid @RequestBody CreateAccountRequest request, UriComponentsBuilder uriBuilder) {
@@ -91,8 +93,7 @@ class AccountController {
                         identity.getEmail(),
                         identity.getFirstName(),
                         identity.getLastName(),
-                        identity.isEmailVerified(),
-                        identity.getPassword()));
+                        identity.isEmailVerified()));
 
         URI location = uriBuilder.path("/v1/accounts/{id}").buildAndExpand(account.getAccountId()).toUri();
 
