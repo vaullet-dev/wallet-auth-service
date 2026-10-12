@@ -24,6 +24,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
@@ -58,7 +59,8 @@ import org.springframework.validation.annotation.Validated;
  *
  * <p><b>Nobody administers themselves.</b> Changing your own roles, disabling yourself and deleting
  * yourself are refused ({@code SELF_CHANGE_FORBIDDEN}), and so is a token that does not say who its
- * holder is — without a {@code sub} the rule could not tell. With the live check, whoever removes a
+ * holder is — without a {@code sub} the rule could not tell — and any caller who is not a Keycloak
+ * token at all, the local profile's anonymous principal aside. With the live check, whoever removes a
  * {@code SUPER_ADMIN} is another one who still is, so the last cannot be removed; only two of them
  * removing each other at the same moment could do it.
  *
@@ -298,17 +300,23 @@ public class StaffService {
     /**
      * Who is asking, as the Keycloak id their token's {@code sub} names.
      *
-     * <p>Empty only for a caller who is not a realm user at all — the local profile's anonymous
-     * principal — and who therefore cannot be the target of anything here. A token without a usable
-     * {@code sub} is refused outright: the self-rules and the live check both need to know who the
-     * caller is, and failing open would switch them off unnoticed. Keycloak puts {@code sub} in a
-     * token only through the {@code basic} client scope, so a client configured without it would
-     * otherwise do exactly that.
+     * <p>Empty only for the local profile's anonymous principal: not a realm user at all, and so
+     * never the target of anything here. Everything else must name its holder, because the
+     * self-rules and the live check both need to know who the caller is, and an empty answer
+     * switches them off. So a token without a usable {@code sub} is refused — Keycloak puts one in
+     * only through the {@code basic} client scope, so a client configured without it would
+     * otherwise do exactly that — and so is any authentication that is not a Keycloak token at all.
+     * Today the resource server produces nothing else, but an opaque-token introspector or another
+     * converter added later would, and it must fail closed here rather than open.
      */
     private static Optional<UUID> caller() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        if (!(authentication instanceof JwtAuthenticationToken token)) {
+        if (authentication instanceof AnonymousAuthenticationToken) {
             return Optional.empty();
+        }
+        if (!(authentication instanceof JwtAuthenticationToken token)) {
+            throw new AccessDeniedException("Staff changes need a Keycloak token that says who the caller is, "
+                    + "and this request has none");
         }
         String subject = token.getToken().getSubject();
         if (subject != null) {

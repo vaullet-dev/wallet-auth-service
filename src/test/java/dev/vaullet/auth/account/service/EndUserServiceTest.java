@@ -18,6 +18,7 @@ import dev.vaullet.auth.account.dao.KeycloakUsers.NewKeycloakUser;
 import dev.vaullet.auth.account.dao.KeycloakUsers.UpdateOutcome;
 import dev.vaullet.auth.common.error.exception.AccountClosedException;
 import dev.vaullet.auth.common.error.exception.EmailDeliveryUnavailableException;
+import dev.vaullet.auth.common.error.exception.EmailNotVerifiedException;
 import dev.vaullet.auth.common.error.exception.EmailTakenException;
 import dev.vaullet.auth.common.error.exception.ExternalRefTakenException;
 import dev.vaullet.auth.common.error.exception.IdentityAlreadyLinkedException;
@@ -91,6 +92,12 @@ class EndUserServiceTest {
         Map<String, List<String>> attributes =
                 accountId == null ? Map.of() : Map.of("account_id", List.of(accountId.toString()));
         return new KeycloakUser(id, username, email, "Jane", "Doe", false, true, 0L, attributes, List.of());
+    }
+
+    /** The same user, with an email address they have proved. */
+    private static KeycloakUser verified(KeycloakUser user) {
+        return new KeycloakUser(user.id(), user.username(), user.email(), user.firstName(), user.lastName(), true,
+                user.enabled(), user.createdTimestamp(), user.attributes(), user.requiredActions());
     }
 
     @Nested
@@ -380,10 +387,37 @@ class EndUserServiceTest {
     class SendPasswordReset {
 
         @Test
-        @DisplayName("emails the link, with the configured lifespan")
+        @DisplayName("emails the link to a verified address, with the configured lifespan")
         void sends() {
             when(accounts.findById(ACCOUNT)).thenReturn(Optional.of(row(ACCOUNT, SUB, REF, "SUSPENDED")));
             when(keycloak.emailConfigured()).thenReturn(true);
+            when(keycloak.findById(SUB)).thenReturn(Optional.of(verified(user(SUB, USERNAME, EMAIL, ACCOUNT))));
+            when(keycloak.sendSetPasswordEmail(SUB, LINK_LIFESPAN)).thenReturn(true);
+
+            service.sendPasswordReset(ACCOUNT);
+
+            verify(keycloak).sendSetPasswordEmail(SUB, LINK_LIFESPAN);
+        }
+
+        @Test
+        @DisplayName("refuses an unverified address once the user can sign in: the link would hand over the account")
+        void unverified_address_of_a_user_who_can_sign_in() {
+            when(accounts.findById(ACCOUNT)).thenReturn(Optional.of(row(ACCOUNT, SUB, REF, "ACTIVE")));
+            when(keycloak.emailConfigured()).thenReturn(true);
+            when(keycloak.findById(SUB)).thenReturn(Optional.of(user(SUB, USERNAME, EMAIL, ACCOUNT)));
+            when(keycloak.canSignIn(SUB)).thenReturn(true);
+
+            assertThatThrownBy(() -> service.sendPasswordReset(ACCOUNT)).isInstanceOf(EmailNotVerifiedException.class);
+            verify(keycloak, never()).sendSetPasswordEmail(any(), any());
+        }
+
+        @Test
+        @DisplayName("sends to an unverified address while the user cannot sign in: that is the invitation again")
+        void unverified_address_of_an_invited_user() {
+            when(accounts.findById(ACCOUNT)).thenReturn(Optional.of(row(ACCOUNT, SUB, REF, "ACTIVE")));
+            when(keycloak.emailConfigured()).thenReturn(true);
+            when(keycloak.findById(SUB)).thenReturn(Optional.of(user(SUB, USERNAME, EMAIL, ACCOUNT)));
+            when(keycloak.canSignIn(SUB)).thenReturn(false);
             when(keycloak.sendSetPasswordEmail(SUB, LINK_LIFESPAN)).thenReturn(true);
 
             service.sendPasswordReset(ACCOUNT);
@@ -425,6 +459,18 @@ class EndUserServiceTest {
         void identity_gone() {
             when(accounts.findById(ACCOUNT)).thenReturn(Optional.of(row(ACCOUNT, SUB, REF, "ACTIVE")));
             when(keycloak.emailConfigured()).thenReturn(true);
+            when(keycloak.findById(SUB)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> service.sendPasswordReset(ACCOUNT)).isInstanceOf(ResourceNotFoundException.class);
+            verify(keycloak, never()).sendSetPasswordEmail(any(), any());
+        }
+
+        @Test
+        @DisplayName("404s when the user is deleted between the check and the send")
+        void identity_gone_while_sending() {
+            when(accounts.findById(ACCOUNT)).thenReturn(Optional.of(row(ACCOUNT, SUB, REF, "ACTIVE")));
+            when(keycloak.emailConfigured()).thenReturn(true);
+            when(keycloak.findById(SUB)).thenReturn(Optional.of(verified(user(SUB, USERNAME, EMAIL, ACCOUNT))));
             when(keycloak.sendSetPasswordEmail(SUB, LINK_LIFESPAN)).thenReturn(false);
 
             assertThatThrownBy(() -> service.sendPasswordReset(ACCOUNT)).isInstanceOf(ResourceNotFoundException.class);
