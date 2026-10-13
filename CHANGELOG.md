@@ -1,3 +1,9 @@
+## [0.11.2](https://github.com/vaullet-dev/wallet-auth-service/compare/v0.11.1...v0.11.2) (2026-10-13)
+
+### Fixes
+
+* bruno collection ([082bc8a](https://github.com/vaullet-dev/wallet-auth-service/commit/082bc8a582bfde3f4c6e0b63d917b74c69f9f861))
+
 ## [0.11.1](https://github.com/vaullet-dev/wallet-auth-service/compare/v0.11.0...v0.11.1) (2026-10-12)
 
 ### Fixes
