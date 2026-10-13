@@ -375,6 +375,14 @@ for the requests under them: a folder run top to bottom creates, reads, changes 
 Every request asserts its status, so `bru run --env local` in `bruno/` (the CLI, `@usebruno/cli`)
 checks a local run end to end. The CLI cannot do the browser sign-in, so it is for `local` only.
 
+**Swagger UI** is at <https://vaullet.dev/api/auth/swagger-ui.html>. *Authorize* offers two schemes:
+`bearer-jwt` takes a pasted token, and with `keycloak` Swagger UI signs in itself through Keycloak,
+with the public client `swagger-ui`: authorization code with PKCE (from backend-common 1.0.0 and
+gitops `realm/26-vaullet-swagger-ui-client.yaml`). Sign in as staff with `SUPER_ADMIN`, e.g.
+`test-super-admin`, whose password is in OpenBao at `kv/keycloak/test-users`. Locally, at
+<http://localhost:8080/swagger-ui.html>, there is no sign-in: the `local` profile needs no token,
+and with no issuer there is no `keycloak` scheme.
+
 ---
 
 ## The schema
@@ -932,8 +940,8 @@ tag step last; here it falls out of where the plugin sits.
 **This replaces `scripts/version.sh`**, which the ledger and `backend-common` still use. That script
 answers "what number is this build" correctly but never creates the tag, writes a changelog entry or
 publishes notes — which is why `backend-common`'s CHANGELOG still files everything under
-*Unreleased* while 0.1.0 and 0.1.1 sit in GHCR. This repository is where the replacement is being
-proved before the other two migrate.
+*Unreleased* while 0.1.0, 0.1.1 and 1.0.0 sit in GHCR. This repository is where the replacement is
+being proved before the other two migrate.
 
 **Use `npm ci`, not `npm install`, when checking the tooling.** `npm install` will resolve a
 dependency graph it cannot fully describe and report success; `npm ci` refuses the same graph. That is
@@ -987,8 +995,8 @@ small edit somewhere else.
 paperwork: ADR-008's scope table is the *source* the mesh policy and the Keycloak client scopes are
 generated from, so an endpoint missing from it is ungoverned — whatever the mesh policy is generated
 from does not know it exists. The scopes themselves are reachable since gitops#12: the demo client
-`bruno` carries `identity:read` and `identity:admin`, which is how these endpoints are tried by hand
-today. The admin dashboard will need a client of its own.
+`bruno` and Swagger UI's `swagger-ui` carry `identity:read` and `identity:admin`, which is how these
+endpoints are tried by hand today. The admin dashboard will need a client of its own.
 
 ---
 

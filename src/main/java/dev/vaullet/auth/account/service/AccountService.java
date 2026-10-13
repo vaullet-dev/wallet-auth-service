@@ -4,7 +4,7 @@ import dev.vaullet.auth.account.dao.AccountRepository;
 import dev.vaullet.auth.common.error.exception.AccountClosedException;
 import dev.vaullet.auth.common.error.exception.ExternalRefTakenException;
 import dev.vaullet.auth.common.error.exception.IdentityAlreadyLinkedException;
-import dev.vaullet.common.error.ResourceNotFoundException;
+import dev.vaullet.common.error.exception.ResourceNotFoundException;
 import jakarta.validation.Valid;
 import java.util.Optional;
 import java.util.function.Supplier;
@@ -21,12 +21,6 @@ import org.springframework.validation.annotation.Validated;
  * its controllers and its own code says that is the wrong layer; this service has no such history.
  * Step 2 drives account creation from a Kafka listener during just-in-time provisioning, and a rule
  * that lives on a controller does not protect a listener. One copy, on the method it protects.
- *
- * <p>NOTE on the {@code ResourceNotFoundException} import: it comes from
- * {@code dev.vaullet.common.error}, the location in the published {@code backend-common} 0.1.1 this
- * service pins. The library's source has since moved it to {@code …error.exception}, which is a
- * breaking change awaiting a 0.2.0 release. This import changes in the same commit that bumps
- * {@code common.version}.
  *
  * <p>Roles as well as scopes, because ADR-006's separation of duties is the point: creating an
  * account is {@code SUPER_ADMIN}'s and freezing one is {@code FRAUD_REVIEWER}'s.
