@@ -7,7 +7,7 @@ import dev.vaullet.auth.common.error.exception.EmailTakenException;
 import dev.vaullet.auth.common.error.exception.SelfChangeForbiddenException;
 import dev.vaullet.auth.common.error.exception.UsernameTakenException;
 import dev.vaullet.auth.common.paging.Slice;
-import dev.vaullet.common.error.ResourceNotFoundException;
+import dev.vaullet.common.error.exception.ResourceNotFoundException;
 import jakarta.validation.constraints.NotEmpty;
 import java.time.Instant;
 import java.util.EnumSet;

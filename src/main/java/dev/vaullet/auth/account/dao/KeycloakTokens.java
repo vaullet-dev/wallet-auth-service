@@ -2,7 +2,7 @@ package dev.vaullet.auth.account.dao;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import dev.vaullet.common.error.UpstreamUnavailableException;
+import dev.vaullet.common.error.exception.UpstreamUnavailableException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;

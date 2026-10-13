@@ -58,13 +58,19 @@
       A released version of backend-common, never a snapshot: this service must be able to
       rebuild the exact bytes it deployed, and a snapshot coordinate cannot promise that.
 
-      0.1.1 rather than the ledger's 0.1.0 — it is the newest published release and a service
-      with no history has nothing to regress. The two are expected to drift: the library moves
-      on its own schedule (ADR-013), and pinning every consumer together would mean a library
-      patch forces a release of every service. Bumping it here is a deliberate `deps:` commit,
-      which is a PATCH — the library moving is not, by itself, a change to this service's API.
+      1.0.0 is the release that moved ResourceNotFoundException, ResourceConflictException and
+      UpstreamUnavailableException one package down, to dev.vaullet.common.error.exception
+      (backend-common#16). A moved class is binary-incompatible, so backend-common's japicmp
+      gate accepts it only as a MAJOR; the imports here changed with this version. 1.0.0 also
+      brings Swagger UI's sign-in through Keycloak: Authorize offers a `keycloak` scheme next
+      to `bearer-jwt`.
+
+      The version need not match the ledger's, and is not expected to: the library moves on its
+      own schedule (ADR-013), and pinning every consumer together would mean a library patch
+      forces a release of every service. Bumping it here is a deliberate `deps:` commit, which
+      is a PATCH — the library moving is not, by itself, a change to this service's API.
     -->
-    <common.version>0.1.1</common.version>
+    <common.version>1.0.0</common.version>
     <springdoc.version>3.1.0</springdoc.version>
     <flatten-maven-plugin.version>1.7.3</flatten-maven-plugin.version>
   </properties>

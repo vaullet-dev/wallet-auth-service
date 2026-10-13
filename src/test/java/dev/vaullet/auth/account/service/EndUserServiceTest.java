@@ -25,7 +25,7 @@ import dev.vaullet.auth.common.error.exception.IdentityAlreadyLinkedException;
 import dev.vaullet.auth.common.error.exception.UsernameTakenException;
 import dev.vaullet.auth.common.paging.Slice;
 import dev.vaullet.auth.config.AuthProperties;
-import dev.vaullet.common.error.ResourceNotFoundException;
+import dev.vaullet.common.error.exception.ResourceNotFoundException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;

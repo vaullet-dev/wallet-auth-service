@@ -13,7 +13,7 @@ import dev.vaullet.auth.account.dao.AccountRepository.AccountRow;
 import dev.vaullet.auth.common.error.exception.AccountClosedException;
 import dev.vaullet.auth.common.error.exception.ExternalRefTakenException;
 import dev.vaullet.auth.common.error.exception.IdentityAlreadyLinkedException;
-import dev.vaullet.common.error.ResourceNotFoundException;
+import dev.vaullet.common.error.exception.ResourceNotFoundException;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
