@@ -1,3 +1,9 @@
+## [0.12.0](https://github.com/vaullet-dev/wallet-auth-service/compare/v0.11.2...v0.12.0) (2026-10-14)
+
+### Features
+
+* the account-created outbox ([0d84dcb](https://github.com/vaullet-dev/wallet-auth-service/commit/0d84dcbce624cccc6d30bdf7c42db73e9d21b80b))
+
 ## [0.11.2](https://github.com/vaullet-dev/wallet-auth-service/compare/v0.11.1...v0.11.2) (2026-10-13)
 
 ### Fixes
