@@ -154,17 +154,20 @@ auth:
   # Keycloak realm, and this service manages them — POST /v1/accounts with an identity,
   # the identity endpoints and DELETE. Local mode needs auth.keycloak.url and
   # client-secret below and refuses to start without them, so a deployment that forgot
-  # them fails at startup instead of serving without user management. `federated`, the
+  # them fails at startup instead of serving without user management. (The outbox relay
+  # needs the same two in either mode — see auth.outbox.relay.) `federated`, the
   # operator's own identity provider, is deferred: it starts, but runs the anchor alone.
   provider: ${AUTH_PROVIDER:local}
   keycloak:
     # The in-cluster Service, relative path included, e.g.
     # http://keycloak-keycloakx-http.keycloak.svc/auth. Not the public vaullet.dev/auth:
-    # the gateway route to /auth/admin/ is one that should close. Required in local mode.
+    # the gateway route to /auth/admin/ is one that should close. Required in local mode,
+    # and by the outbox relay below in either mode: its token comes from this client.
     url: ${KEYCLOAK_URL:}
     realm: ${KEYCLOAK_REALM:vaullet}
     client-id: ${KEYCLOAK_CLIENT_ID:wallet-auth-service}
-    # From OpenBao via External Secrets, like the database password. Required in local mode.
+    # From OpenBao via External Secrets, like the database password. Required as the URL
+    # is: in local mode, and while the relay is on.
     client-secret: ${KEYCLOAK_CLIENT_SECRET:}
     timeout: 5s
   user-management:
@@ -172,6 +175,41 @@ auth:
     # default for an email an admin triggers is 12 hours, which kills an invitation sent
     # on a Friday evening before Monday.
     email-link-lifespan: ${AUTH_EMAIL_LINK_LIFESPAN:72h}
+  # The ledger, where the outbox relay opens every new account's wallets (#39).
+  ledger:
+    # Its in-cluster Service, e.g. http://ledger-service.wallet-ledger.svc, and the only way
+    # in: the ledger has no public route, because ADR-008 has only services call it.
+    # Required while the relay is on.
+    url: ${LEDGER_URL:}
+    timeout: 5s
+  # The account-created outbox (#39). Creating an account writes its
+  # identity.account-created entry in the same transaction whatever this says; the relay
+  # is what delivers it — until there is Kafka, as the ledger's POST /v1/wallets for REAL
+  # and then BONUS.
+  outbox:
+    relay:
+      # ON unless a profile says otherwise, as production needs it, so a deployment that
+      # forgot LEDGER_URL fails at startup instead of queueing in silence. Off, entries
+      # still queue, and switching it on again delivers them. Its token comes from the
+      # Keycloak client above, asking for ledger:write too, so auth.keycloak.url and
+      # client-secret are required with it — in either identity mode.
+      enabled: ${AUTH_OUTBOX_RELAY_ENABLED:true}
+      # From the end of one round to the start of the next, and how many due entries one
+      # round claims.
+      poll-interval: ${AUTH_OUTBOX_POLL_INTERVAL:5s}
+      batch-size: ${AUTH_OUTBOX_BATCH_SIZE:20}
+      # How long a claimed entry is kept from every other replica. It must outlast one
+      # delivery — two calls to the ledger, each perhaps after a token, at the timeouts
+      # configured here — and the relay refuses to start if it does not.
+      lease: 2m
+      # After a failed attempt: 10s, doubling, at most 15m — and never given up on.
+      initial-backoff: 10s
+      max-backoff: 15m
+      # The sweep: at start, and then this often, the relay queues the entry of every
+      # account that is not CLOSED and has none. It catches the accounts the previous
+      # version creates while a release rolls out, after its migration ran, and anything
+      # else that slipped; normally it finds nothing.
+      sweep-interval: ${AUTH_OUTBOX_SWEEP_INTERVAL:10m}
 
 vaullet:
   api:

@@ -16,7 +16,8 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
 /**
- * Every statement this service issues against {@code identity_schema}, and nothing else.
+ * Every statement this service issues against {@code identity_schema.accounts}, and nothing else.
+ * The outbox beside it has its own, {@code OutboxRepository}.
  *
  * <p>The SQL itself lives in {@code db/sql/accounts/}, loaded by {@link AccountStatements}. What is
  * left here is the shape: six statements, what each one is called, and how a row becomes an object.
@@ -141,7 +142,12 @@ public class AccountRepository {
 
     private static final RowMapper<AccountRow> MAPPER = AccountRepository::mapRow;
 
-    /** Create the anchor. See {@code insert.sql} for why there is no {@code ON CONFLICT}. */
+    /**
+     * Create the anchor. See {@code insert.sql} for why there is no {@code ON CONFLICT}.
+     *
+     * <p>Whoever calls this queues the account's {@code identity.account-created} entry in the same
+     * transaction, with {@code Outbox.accountCreated}, or the ledger never hears of the account.
+     */
     public AccountRow insert(
             UUID accountId, @Nullable UUID keycloakSub, @Nullable String externalRef, String status) {
         return one(sql.insert, accountId, keycloakSub, externalRef, status)

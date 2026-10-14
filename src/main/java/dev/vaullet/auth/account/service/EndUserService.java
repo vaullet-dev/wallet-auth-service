@@ -14,6 +14,7 @@ import dev.vaullet.auth.common.error.exception.IdentityAlreadyLinkedException;
 import dev.vaullet.auth.common.error.exception.UsernameTakenException;
 import dev.vaullet.auth.common.paging.Slice;
 import dev.vaullet.auth.config.AuthProperties;
+import dev.vaullet.auth.outbox.service.Outbox;
 import dev.vaullet.common.error.exception.ResourceNotFoundException;
 import java.time.Duration;
 import java.time.Instant;
@@ -30,6 +31,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionOperations;
 
 /**
  * End users in local identity mode: the account and its Keycloak user, created, read, changed and
@@ -47,7 +49,9 @@ import org.springframework.stereotype.Service;
  *       this request is recognisable — it carries an {@code account_id} and the requested email
  *       address — and is finished rather than refused. That is what heals a create that stopped
  *       between the two systems, without waiting for step 2's first-login path.
- *   <li>The anchor is inserted. This is the commit point: once the row exists, the account exists.
+ *   <li>The anchor is inserted. This is the commit point: once the row exists, the account exists —
+ *       and so does its {@code identity.account-created} entry in the outbox, written in the same
+ *       transaction so that the ledger opens the account's wallets (#39).
  *   <li>{@code END_USER} is granted, <em>after</em> the insert. A user whose anchor never got
  *       written therefore holds no role, and a grant that failed is repeated by the replay of the
  *       retry, which grants again.
@@ -82,11 +86,20 @@ public class EndUserService {
 
     private final AccountRepository accounts;
     private final KeycloakUsers keycloak;
+    private final Outbox outbox;
+    private final TransactionOperations transactions;
     private final Duration emailLinkLifespan;
 
-    EndUserService(AccountRepository accounts, KeycloakUsers keycloak, AuthProperties properties) {
+    EndUserService(
+            AccountRepository accounts,
+            KeycloakUsers keycloak,
+            Outbox outbox,
+            TransactionOperations transactions,
+            AuthProperties properties) {
         this.accounts = accounts;
         this.keycloak = keycloak;
+        this.outbox = outbox;
+        this.transactions = transactions;
         this.emailLinkLifespan = properties.userManagement().emailLinkLifespan();
     }
 
@@ -94,7 +107,8 @@ public class EndUserService {
      * Create an end user, or return the one this request already created.
      *
      * <p>Not {@code @Transactional}. Holding a database connection across calls to Keycloak would
-     * tie the pool to Keycloak's latency, and the one write here is a single statement.
+     * tie the pool to Keycloak's latency. The one write here — the anchor and its outbox entry —
+     * runs in a transaction of its own, with no call to Keycloak inside it.
      */
     @PreAuthorize(AccountAccess.USER_ADMIN)
     public Account create(NewEndUser command) {
@@ -129,8 +143,7 @@ public class EndUserService {
             log.info("Finishing an interrupted create: Keycloak user {} has no account yet", subject);
         }
 
-        Account account = AccountService.toDomain(
-                accounts.insert(accountId, subject, command.getExternalRef(), AccountStatus.ACTIVE.name()));
+        Account account = insertAnchor(accountId, subject, command.getExternalRef());
         keycloak.grantRealmRole(subject, END_USER);
         sendSetPasswordLink(accountId, subject);
         return account;
@@ -274,6 +287,24 @@ public class EndUserService {
     }
 
     // ------------------------------------------------------------------------------------------------
+
+    /**
+     * The anchor and its {@code identity.account-created} entry, in one transaction of their own:
+     * both rows or neither (#39). Only the two statements are inside it; Keycloak is called before
+     * and after, never while a connection is held.
+     */
+    private Account insertAnchor(UUID accountId, UUID subject, String externalRef) {
+        @Nullable AccountRow row = transactions.execute(status -> {
+            AccountRow inserted = accounts.insert(accountId, subject, externalRef, AccountStatus.ACTIVE.name());
+            outbox.accountCreated(inserted.getAccountId(), inserted.getCreatedAt());
+            return inserted;
+        });
+        if (row == null) {
+            // TransactionOperations may return null in general; this callback never does.
+            throw new IllegalStateException("The anchor's transaction returned no row");
+        }
+        return AccountService.toDomain(row);
+    }
 
     /**
      * Keycloak answered 409. Decide whether the user it already has is this request's own earlier

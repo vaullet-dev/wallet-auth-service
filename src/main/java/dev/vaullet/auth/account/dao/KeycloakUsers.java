@@ -130,7 +130,9 @@ public class KeycloakUsers {
                 .requestFactory(requests)
                 .baseUrl(url.endsWith("/") ? url.substring(0, url.length() - 1) : url)
                 .build();
-        KeycloakTokens tokens = new KeycloakTokens(base, realm, clientId, secret);
+        // No scope beyond the client's defaults: the Admin API checks realm-management roles, not
+        // scopes, and ledger:write has no business in this token.
+        KeycloakTokens tokens = new KeycloakTokens(base, realm, clientId, secret, null);
         this.admin = base.mutate()
                 .requestInterceptor((request, body, execution) -> {
                     request.getHeaders().setBearerAuth(tokens.bearer());

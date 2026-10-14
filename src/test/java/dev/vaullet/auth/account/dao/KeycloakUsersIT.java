@@ -41,7 +41,12 @@ class KeycloakUsersIT {
                         KeycloakTestContainer.CLIENT_ID,
                         KeycloakTestContainer.CLIENT_SECRET,
                         Duration.ofSeconds(10)),
-                new AuthProperties.UserManagement(Duration.ofHours(72))));
+                new AuthProperties.UserManagement(Duration.ofHours(72)),
+                // Not read by KeycloakUsers: the ledger is the outbox relay's.
+                new AuthProperties.Ledger(null, Duration.ofSeconds(5)),
+                new AuthProperties.Outbox(new AuthProperties.Outbox.Relay(
+                        false, Duration.ofSeconds(5), 20, Duration.ofMinutes(2),
+                        Duration.ofSeconds(10), Duration.ofMinutes(15), Duration.ofMinutes(10)))));
     }
 
     private static String unique(String prefix) {

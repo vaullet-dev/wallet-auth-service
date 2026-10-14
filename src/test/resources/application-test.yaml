@@ -62,6 +62,14 @@ auth:
     # that strays into Keycloak fails loudly instead of passing against nothing.
     url: http://keycloak.invalid
     client-secret: unused
+  outbox:
+    relay:
+      # OFF, so nothing polls the database behind a test's back. OutboxRelayIT builds its
+      # own relays, pointed at stand-ins for the ledger and Keycloak, and runs their rounds
+      # by hand; a scheduled relay in a cached context would deliver other tests' entries
+      # while they assert on them. OutboxRelayApplicationIT is the one that turns it on, to
+      # show the schedule itself, in a context of its own that is closed after its class.
+      enabled: false
 
 vaullet:
   api:

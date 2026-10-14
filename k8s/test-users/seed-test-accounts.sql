@@ -15,6 +15,18 @@
 -- Runs on every sync. ON CONFLICT DO NOTHING makes that safe, and it deliberately never resets
 -- the row: a status a test changed stays changed, and CLOSED is terminal anyway (the
 -- accounts_invariants trigger). Runs as auth_app, which may INSERT and nothing more.
-INSERT INTO identity_schema.accounts (account_id, external_ref, status)
-VALUES ('7e57a11c-0000-4000-8000-000000000001', 'test-end-user', 'ACTIVE')
-ON CONFLICT DO NOTHING;
+--
+-- Like every account, it gets its identity.account-created entry in the outbox, so the relay
+-- opens its wallets in the ledger (#39) — in the same statement, which makes it the same
+-- transaction: the entry is written exactly when this inserts the account. When the account
+-- was already there, V3's backfill queued it, or the seed did on an earlier sync.
+WITH seeded AS (
+    INSERT INTO identity_schema.accounts (account_id, external_ref, status)
+    VALUES ('7e57a11c-0000-4000-8000-000000000001', 'test-end-user', 'ACTIVE')
+    ON CONFLICT DO NOTHING
+    RETURNING account_id, created_at
+)
+INSERT INTO identity_schema.outbox
+       (event_id, event_type, schema_version, occurred_at, producer_service, account_id, payload)
+SELECT gen_random_uuid(), 'identity.account-created', '1.0.0', created_at, 'auth-service', account_id, '{}'
+  FROM seeded;

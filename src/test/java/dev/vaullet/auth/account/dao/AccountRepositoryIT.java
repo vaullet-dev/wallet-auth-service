@@ -45,7 +45,8 @@ class AccountRepositoryIT {
 
     @BeforeEach
     void clean() {
-        jdbc.execute("TRUNCATE identity_schema.accounts");
+        // Together: the outbox's foreign key would refuse an accounts table emptied on its own.
+        jdbc.execute("TRUNCATE identity_schema.outbox, identity_schema.accounts");
     }
 
     private AccountRow anAccount(String ref) {

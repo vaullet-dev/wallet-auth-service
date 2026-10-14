@@ -25,6 +25,7 @@ import dev.vaullet.auth.common.error.exception.IdentityAlreadyLinkedException;
 import dev.vaullet.auth.common.error.exception.UsernameTakenException;
 import dev.vaullet.auth.common.paging.Slice;
 import dev.vaullet.auth.config.AuthProperties;
+import dev.vaullet.auth.outbox.service.Outbox;
 import dev.vaullet.common.error.exception.ResourceNotFoundException;
 import java.time.Duration;
 import java.time.Instant;
@@ -43,6 +44,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.support.TransactionOperations;
 
 /**
  * The end-user rules, without Keycloak or a database.
@@ -68,14 +70,24 @@ class EndUserServiceTest {
     @Mock
     private KeycloakUsers keycloak;
 
+    @Mock
+    private Outbox outbox;
+
     private EndUserService service;
 
     @BeforeEach
     void setUp() {
-        service = new EndUserService(accounts, keycloak, new AuthProperties(
-                AuthProperties.Provider.LOCAL,
-                new AuthProperties.Keycloak(null, "vaullet", "wallet-auth-service", null, Duration.ofSeconds(5)),
-                new AuthProperties.UserManagement(LINK_LIFESPAN)));
+        // No transaction manager here: the callback runs as it is. That the anchor and its entry
+        // share a real transaction is EndUserApiIT's to prove, against PostgreSQL.
+        service = new EndUserService(accounts, keycloak, outbox, TransactionOperations.withoutTransaction(),
+                new AuthProperties(
+                        AuthProperties.Provider.LOCAL,
+                        new AuthProperties.Keycloak(null, "vaullet", "wallet-auth-service", null, Duration.ofSeconds(5)),
+                        new AuthProperties.UserManagement(LINK_LIFESPAN),
+                        new AuthProperties.Ledger(null, Duration.ofSeconds(5)),
+                        new AuthProperties.Outbox(new AuthProperties.Outbox.Relay(
+                                false, Duration.ofSeconds(5), 20, Duration.ofMinutes(2),
+                                Duration.ofSeconds(10), Duration.ofMinutes(15), Duration.ofMinutes(10)))));
     }
 
     private static NewEndUser command() {
@@ -124,11 +136,14 @@ class EndUserServiceTest {
             assertThat(sent.getValue().temporaryPassword()).isNull();
             assertThat(sent.getValue().staff()).isFalse();
 
-            InOrder order = inOrder(keycloak, accounts);
+            InOrder order = inOrder(keycloak, accounts, outbox);
             order.verify(keycloak).requireAccountIdEditableByAdminsOnly();
             order.verify(keycloak).emailConfigured();
             order.verify(keycloak).create(any());
             order.verify(accounts).insert(any(), eq(SUB), eq(REF), eq("ACTIVE"));
+            // With the anchor, before anything else reaches Keycloak: the ledger hears of every
+            // account that exists, including one whose grant or invitation then fails.
+            order.verify(outbox).accountCreated(created.getAccountId(), created.getCreatedAt());
             order.verify(keycloak).grantRealmRole(SUB, "END_USER");
             order.verify(keycloak).sendSetPasswordEmail(SUB, LINK_LIFESPAN);
         }
@@ -157,6 +172,8 @@ class EndUserServiceTest {
             assertThat(replayed.getAccountId()).isEqualTo(ACCOUNT);
             verify(keycloak, never()).create(any());
             verify(accounts, never()).insert(any(), any(), any(), any());
+            // The first attempt queued the account's event with its anchor; a replay queues none.
+            verifyNoInteractions(outbox);
             // Granted again, in case the attempt being repeated stopped before its grant.
             verify(keycloak).grantRealmRole(SUB, "END_USER");
             // The user can sign in already, so a replay emails nobody.
@@ -226,6 +243,9 @@ class EndUserServiceTest {
 
             // The id the first attempt wrote into Keycloak, not a new one: tokens already carry it.
             assertThat(finished.getAccountId()).isEqualTo(earlierAccountId);
+            // The interrupted attempt never got as far as the anchor, so this is where the event is
+            // queued — once, with the anchor.
+            verify(outbox).accountCreated(earlierAccountId, finished.getCreatedAt());
             verify(keycloak).grantRealmRole(SUB, "END_USER");
             verify(keycloak).sendSetPasswordEmail(SUB, LINK_LIFESPAN);
         }
@@ -241,6 +261,7 @@ class EndUserServiceTest {
 
             assertThatThrownBy(() -> service.create(command())).isInstanceOf(IdentityAlreadyLinkedException.class);
             verify(accounts, never()).insert(any(), any(), any(), any());
+            verifyNoInteractions(outbox);
         }
 
         @Test

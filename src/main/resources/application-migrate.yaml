@@ -65,3 +65,27 @@ spring:
       # be mid-deploy and short of slots.
       maximum-pool-size: 2
       minimum-idle: 0
+
+auth:
+  # FEDERATED, for this process only. The Job has no web layer and manages no users,
+  # and `federated` is the mode that registers none of the local-mode beans. Left at
+  # the base file's `local`, KeycloakUsers demands auth.keycloak.url — which the Job is
+  # rightly not given — and fails the context after Flyway has already run: the schema
+  # migrated, and the Job exited 1 anyway, from 0.10.0, when local became the default,
+  # until #39. Nothing here asks Keycloak anything, so nothing is lost.
+  #
+  # The running service is untouched by this: it keeps `local`, and keeps refusing to
+  # start without KEYCLOAK_URL.
+  #
+  # k8s/migrate-job.yaml sets both of these values again, as environment variables,
+  # which outrank this file. Those are for the images that predate it — a rollback, or
+  # an older tag synced against the current manifest, must still exit 0 in wave 0 —
+  # and these are for running the profile any other way: `java -jar` with prod,migrate
+  # and nothing else set migrates and exits 0 on its own.
+  provider: federated
+  outbox:
+    relay:
+      # OFF. This process migrates and exits. A relay here would be one more replica
+      # delivering for the seconds it lives, and would want LEDGER_URL, which the Job
+      # is not given.
+      enabled: false

@@ -1,11 +1,19 @@
 # The running service. Holds auth_app, which V2 granted SELECT/INSERT/UPDATE on
-# one table and nothing else -- no DDL, not even DELETE. The migration Job holds
-# a different role; neither process can do the other's job.
+# its tables -- accounts, and through V2's default privileges V3's outbox -- and
+# nothing else: no DDL, not even DELETE. The migration Job holds a different
+# role; neither process can do the other's job.
+#
+# Sync wave 1, after the migration Job (a Sync hook in wave 0). Argo applies this
+# only once the Job has succeeded, so a new version never starts in front of a
+# schema it was not built for -- V3's outbox table, the first the code cannot
+# run without, included. Until #39 both were wave 0 and nothing waited.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: auth-service
   labels: { app: auth-service }
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
 spec:
   replicas: 1
   revisionHistoryLimit: 5
@@ -68,6 +76,16 @@ spec:
             - { name: KEYCLOAK_URL,  value: "http://keycloak-keycloakx-http.keycloak.svc/auth" }
             - name: KEYCLOAK_CLIENT_SECRET
               valueFrom: { secretKeyRef: { name: keycloak-client, key: KEYCLOAK_CLIENT_SECRET } }
+
+            # The outbox relay (#39) opens every new account's REAL and BONUS wallets
+            # in the ledger, on its in-cluster Service: the ledger has no public route
+            # (ADR-008). Its token is the Keycloak client above asking for ledger:write,
+            # which the client offers as an optional scope (gitops#30). Until the
+            # ledger is deployed (wallet-ledger-service#12) entries wait and retry.
+            # The switch: "false" stops delivery and entries queue until it is "true"
+            # again -- every replica reads it, so set it here, not on one pod.
+            - { name: AUTH_OUTBOX_RELAY_ENABLED, value: "true" }
+            - { name: LEDGER_URL,                value: "http://ledger-service.wallet-ledger.svc" }
 
           # Liveness and readiness are separate endpoints for a reason: readiness
           # fails while the database is unreachable so traffic stops, but liveness

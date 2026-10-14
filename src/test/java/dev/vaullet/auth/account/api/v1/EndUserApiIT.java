@@ -14,6 +14,7 @@ import com.jayway.jsonpath.JsonPath;
 
 import dev.vaullet.auth.account.dao.KeycloakUsers;
 import dev.vaullet.auth.account.dao.KeycloakUsers.NewKeycloakUser;
+import dev.vaullet.auth.support.FailingOutbox;
 import dev.vaullet.auth.support.KeycloakTestContainer;
 import dev.vaullet.auth.support.SmtpSink;
 import dev.vaullet.common.test.IntegrationTest;
@@ -25,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.JwtRequestPostProcessor;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -57,6 +59,9 @@ class EndUserApiIT {
 
     @Autowired
     private KeycloakUsers keycloak;
+
+    @Autowired
+    private JdbcTemplate jdbc;
 
     private static JwtRequestPostProcessor superAdmin() {
         return jwt().authorities(
@@ -202,6 +207,45 @@ class EndUserApiIT {
 
             assertThat(create(person)).isEqualTo(earlierAccountId.toString());
             assertThat(SmtpSink.messagesTo(person.email())).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("queues the account's identity.account-created event with its anchor")
+        void queues_the_account_created_event() throws Exception {
+            UUID id = UUID.fromString(create(Person.fresh()));
+
+            assertThat(jdbc.queryForObject("""
+                    SELECT count(*) FROM identity_schema.outbox
+                     WHERE account_id = ? AND event_type = 'identity.account-created' AND delivered_at IS NULL""",
+                    Integer.class, id)).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("an anchor whose event cannot be written is not written either, and the retry finishes the create")
+        void no_anchor_without_its_event() throws Exception {
+            Person person = Person.fresh();
+            FailingOutbox refusing = FailingOutbox.forReference(jdbc, person.ref());
+            try {
+                mvc.perform(post("/v1/accounts").with(superAdmin())
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(body(person)))
+                        .andExpect(status().isInternalServerError());
+            } finally {
+                refusing.close();
+            }
+
+            // Keycloak has the user, born carrying its account id; the anchor and its entry were
+            // rolled back together, so neither exists.
+            UUID id = keycloak.findByUsername(person.username()).orElseThrow().accountId().orElseThrow();
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM identity_schema.accounts WHERE account_id = ?",
+                    Integer.class, id)).isZero();
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM identity_schema.outbox WHERE account_id = ?",
+                    Integer.class, id)).isZero();
+
+            // The retry is the recovery path: it finishes the create under the same id, event included.
+            assertThat(create(person)).isEqualTo(id.toString());
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM identity_schema.outbox WHERE account_id = ?",
+                    Integer.class, id)).isEqualTo(1);
         }
 
         @Test

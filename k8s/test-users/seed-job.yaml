@@ -6,7 +6,7 @@
 # image is already on every node (Keycloak's schema init container uses it).
 #
 # Holds auth_app, the running service's own role, not the migrator: seeding is DML, and auth_app
-# can INSERT into accounts and do nothing else.
+# can INSERT into accounts and the outbox and do nothing else.
 apiVersion: batch/v1
 kind: Job
 metadata:

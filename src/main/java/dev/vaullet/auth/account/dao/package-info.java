@@ -1,6 +1,7 @@
 /**
- * Persistence for the account anchor. Every statement this service issues lives here, and nothing
- * outside this package touches {@code JdbcTemplate} — a rule {@code LayeringTest} enforces.
+ * Persistence for the account anchor. Every statement against the accounts table lives here — the
+ * outbox's are in {@code outbox.dao} — and nothing outside a {@code dao} package touches
+ * {@code JdbcTemplate}, a rule {@code LayeringTest} enforces.
  *
  * <p>{@link org.jspecify.annotations.NullMarked} is declared here and not inherited from the parent
  * package: Java packages do not nest for annotation purposes. It earns its place in this package

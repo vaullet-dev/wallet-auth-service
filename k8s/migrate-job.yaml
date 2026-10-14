@@ -2,11 +2,17 @@
 # deployed environment application-prod.yaml sets spring.flyway.enabled=false,
 # so the running service never has DDL rights and never sees this credential.
 #
-# An Argo SYNC HOOK rather than a plain Job in a sync wave. A Job's spec is
-# immutable, so a plain Job cannot be updated when the image tag changes -- Argo
-# would try, the API would refuse, and the sync would fail on every release.
+# An Argo SYNC HOOK rather than a plain Job. A Job's spec is immutable, so a
+# plain Job cannot be updated when the image tag changes -- Argo would try, the
+# API would refuse, and the sync would fail on every release.
 # BeforeHookCreation deletes the previous Job and creates a new one each sync,
 # which is what "run the migrations for this version" actually means.
+#
+# Sync wave 0, and the Deployment is wave 1: Argo applies the Deployment only
+# after this Job has succeeded, so a failed migration fails the sync and leaves
+# the running version as it was. Which is also why the Job must exit 0 when it
+# has migrated, whichever image it runs -- AUTH_PROVIDER below says why some
+# did not.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -14,6 +20,7 @@ metadata:
   annotations:
     argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "0"
 spec:
   backoffLimit: 2
   # A migration that hangs holds an advisory lock. Fail loudly instead.
@@ -50,6 +57,22 @@ spec:
               value: "50"
             - name: APP_ENVIRONMENT
               value: prod
+            # FEDERATED and no relay, here as well as in application-migrate.yaml,
+            # because this manifest runs whatever image the tag names, and only images
+            # from #39 on carry that file's two settings. 0.10.0 to 0.11.x default to
+            # `local`, whose KeycloakUsers demands KEYCLOAK_URL -- not given here -- and
+            # fail the context after Flyway has run: migrated, and exit 1. In wave 0 that
+            # holds the Deployment back for good, so a GitOps rollback to one of them, or
+            # a sync that runs the old tag against this manifest before newTag is bumped,
+            # would never get past this Job. They read AUTH_PROVIDER, and an environment
+            # variable outranks the files: with it they migrate (or find a newer schema,
+            # which Flyway leaves alone) and exit 0. Earlier images were federated by
+            # default or had no such setting, and no image before #39 has a relay to
+            # switch off; a name an image does not know, it ignores.
+            - name: AUTH_PROVIDER
+              value: federated
+            - name: AUTH_OUTBOX_RELAY_ENABLED
+              value: "false"
             # platform-rw always points at the current primary of the `platform`
             # CloudNativePG cluster. currentSchema, not a later search_path: ADR-003
             # puts keycloak_schema in this same database and it is not ours.

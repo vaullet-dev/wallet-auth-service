@@ -69,6 +69,14 @@ auth:
     # secret in any useful sense: that Keycloak lives on this laptop, for as long as the
     # application runs.
     client-secret: test-only-secret
+  outbox:
+    relay:
+      # OFF on a laptop. compose.yaml runs no ledger, and its realm's client does not offer
+      # ledger:write, so every delivery would fail and the log would fill with one refusal
+      # per account per backoff. Entries still queue — being written with the account is
+      # the point — and with a ledger and that scope to hand,
+      # AUTH_OUTBOX_RELAY_ENABLED=true and LEDGER_URL deliver everything queued so far.
+      enabled: ${AUTH_OUTBOX_RELAY_ENABLED:false}
 
 vaullet:
   api:

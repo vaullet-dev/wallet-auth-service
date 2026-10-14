@@ -4,6 +4,7 @@ import dev.vaullet.auth.account.dao.AccountRepository;
 import dev.vaullet.auth.common.error.exception.AccountClosedException;
 import dev.vaullet.auth.common.error.exception.ExternalRefTakenException;
 import dev.vaullet.auth.common.error.exception.IdentityAlreadyLinkedException;
+import dev.vaullet.auth.outbox.service.Outbox;
 import dev.vaullet.common.error.exception.ResourceNotFoundException;
 import jakarta.validation.Valid;
 import java.util.Optional;
@@ -15,7 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.validation.annotation.Validated;
 
 /**
- * The account rules, and the only place a transaction begins.
+ * The account rules, and the transactions they run in.
  *
  * <p><b>Authorisation sits here, not on the controller.</b> The ledger puts {@code @PreAuthorize} on
  * its controllers and its own code says that is the wrong layer; this service has no such history.
@@ -37,9 +38,11 @@ import org.springframework.validation.annotation.Validated;
 public class AccountService {
 
     private final AccountRepository accounts;
+    private final Outbox outbox;
 
-    AccountService(AccountRepository accounts) {
+    AccountService(AccountRepository accounts, Outbox outbox) {
         this.accounts = accounts;
+        this.outbox = outbox;
     }
 
     /**
@@ -98,12 +101,19 @@ public class AccountService {
         return insert(command);
     }
 
+    /**
+     * The anchor, and its {@code identity.account-created} entry in the outbox: both in
+     * {@link #create}'s transaction, so they commit together and the ledger hears of every account
+     * that exists, and of no other (#39). A replay inserts nothing and so queues nothing.
+     */
     private Account insert(NewAccount command) {
-        return toDomain(accounts.insert(
+        AccountRepository.AccountRow row = accounts.insert(
                 UUID.randomUUID(),
                 command.getKeycloakSub().orElse(null),
                 command.getExternalRef().orElse(null),
-                AccountStatus.ACTIVE.name()));
+                AccountStatus.ACTIVE.name());
+        outbox.accountCreated(row.getAccountId(), row.getCreatedAt());
+        return toDomain(row);
     }
 
     /**

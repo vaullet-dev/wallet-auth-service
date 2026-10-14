@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import dev.vaullet.auth.account.dao.AccountRepository;
@@ -13,6 +14,7 @@ import dev.vaullet.auth.account.dao.AccountRepository.AccountRow;
 import dev.vaullet.auth.common.error.exception.AccountClosedException;
 import dev.vaullet.auth.common.error.exception.ExternalRefTakenException;
 import dev.vaullet.auth.common.error.exception.IdentityAlreadyLinkedException;
+import dev.vaullet.auth.outbox.service.Outbox;
 import dev.vaullet.common.error.exception.ResourceNotFoundException;
 import java.time.Instant;
 import java.util.Optional;
@@ -49,6 +51,9 @@ class AccountServiceTest {
     @Mock
     private AccountRepository accounts;
 
+    @Mock
+    private Outbox outbox;
+
     @InjectMocks
     private AccountService service;
 
@@ -73,6 +78,8 @@ class AccountServiceTest {
             assertThat(created.getExternalRef()).contains(REF);
             assertThat(created.getStatus()).isEqualTo(AccountStatus.ACTIVE);
             assertThat(created.getKeycloakSub()).isEmpty();
+            // The account's event, in create()'s transaction, occurring when the account was created.
+            verify(outbox).accountCreated(created.getAccountId(), created.getCreatedAt());
         }
 
         @Test
@@ -85,6 +92,8 @@ class AccountServiceTest {
 
             assertThat(result.getAccountId()).isEqualTo(stored.getAccountId());
             verify(accounts, never()).insert(any(), any(), any(), any());
+            // The original create queued the event; a replay must not queue a second.
+            verifyNoInteractions(outbox);
         }
 
         @Test
@@ -131,6 +140,7 @@ class AccountServiceTest {
             // A 201 here would tell the caller their account is ready to use. It is not, permanently.
             assertThatThrownBy(() -> service.create(new NewAccount(null, REF)))
                     .isInstanceOf(AccountClosedException.class);
+            verifyNoInteractions(outbox);
         }
 
         @Test

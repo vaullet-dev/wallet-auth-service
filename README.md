@@ -25,13 +25,15 @@ This service owns **Vaullet's own record of a user** and brokers everything abou
 > invited by email, search and password reset — is written and tested; it needs the realm's `staff`
 > group (gitops#23) and, for anything that sends email, an SMTP server (gitops#20). Federated mode,
 > where an operator's identity provider holds the users, is deferred; step 1 alone never completed
-> it, because nothing links a federated user to its account yet. Read [Build order](#build-order)
+> it, because nothing links a federated user to its account yet. **The account-created outbox**
+> (#39) is written and tested: every account is queued for its ledger wallets in the transaction
+> that creates it, and they are opened once the ledger is deployed. Read [Build order](#build-order)
 > for what exists.
 
 ```
 ./mvnw spring-boot:run     # PostgreSQL, Keycloak and Mailpit via Compose, Flyway migrates, serves on :8080
-./mvnw test                # 91 unit + architecture tests, no Docker
-./mvnw verify              # adds 106 integration tests on real PostgreSQL and Keycloak
+./mvnw test                # 168 unit + architecture tests, no Docker
+./mvnw verify              # adds 152 integration tests on real PostgreSQL and Keycloak
 ```
 
 Then open <http://localhost:8080/swagger-ui.html>, or the collection in [`bruno/`](bruno) — see
@@ -71,6 +73,7 @@ a page, with the full component map, a worked account creation, and every field'
 - [The schema](#the-schema)
 - [Creating an account](#creating-an-account)
 - […and the ledger's account row](#and-the-ledgers-account-row)
+- [The account-created outbox](#the-account-created-outbox)
 - [The account status, and the freeze path](#the-account-status-and-the-freeze-path)
 - [Security](#security)
 - [End users (local mode)](#end-users-local-mode)
@@ -398,6 +401,10 @@ shows what the database *ended up with* — the indexes `UNIQUE` created, the fo
 each `CHECK` into, the trigger timing — rather than what the DDL appears to say. The migration itself
 is [`V1__identity.sql`](src/main/resources/db/migration/V1__identity.sql).
 
+Since V3 the schema holds a second table, `outbox`: each account's `identity.account-created` event,
+written with it — see [The account-created outbox](#the-account-created-outbox). `docs/schema/` has
+not been generated again since V1.
+
 ```sql
 CREATE TABLE accounts (
     account_id   UUID        NOT NULL,
@@ -546,10 +553,11 @@ path; this service should not copy that.
 
 ### …and the ledger's account row
 
-**Creating an account here must create the ledger's row too.** Nothing in the architecture currently
-does this: `account_balances` has no creator, and the ledger has no create endpoint — the gap the
+**Creating an account here must create the ledger's row too.** When this was written nothing in the
+architecture did: `account_balances` had no creator, and the ledger no create endpoint — the gap the
 money-model review surfaced as *"no document says who creates the ledger's account row or its cash
-bucket"*.
+bucket"*. The ledger has since grown wallets, and `POST /v1/wallets` opens an account's `REAL` or
+`BONUS` wallet and, with its first, the account itself: `account_balances` and the `CASH` bucket.
 
 Three ways to close it, and the right answer is a combination of two:
 
@@ -568,15 +576,257 @@ The upsert creates `account_balances` **and** the singleton `CASH` bucket, since
 cash bucket cannot be credited and the ledger's own schema says there is exactly one per account.
 
 > [!NOTE]
-> **There is no outbox anywhere in this architecture.** Publishing after the commit means a crash
-> between the two loses the event permanently. Here that is survivable precisely because of the
-> upsert — the first deposit repairs it — but it is survivable by accident rather than by design, and
-> it is the same gap every other event producer on the platform will hit. Worth a decision of its own
-> before the second producer exists.
+> **There was no outbox anywhere in this architecture.** Publishing after the commit means a crash
+> between the two loses the event permanently — survivable here only by accident, because the first
+> deposit repairs it, and the same gap every later event producer would hit. The decision came with
+> #39: [an outbox](#the-account-created-outbox), written in the account's own transaction.
 
-This lands at step 2, when this service first has a Kafka producer. Until then step 1 mints
-`account_id` and nothing downstream consumes it, which is fine: there is no ledger deployment to be
-inconsistent with.
+**There is no Kafka yet either**, so B arrives in two halves. The event is written today, as a row in
+this service's outbox; until there is a broker to publish it to, a relay here delivers it as the two
+calls the ledger's consumer would make — `POST /v1/wallets` for `REAL`, then `BONUS` — which are
+idempotent exactly as the upsert would be. When Kafka arrives the relay publishes the row instead,
+and the ledger's consumer makes the calls. See [The account-created outbox](#the-account-created-outbox).
+
+---
+
+## The account-created outbox
+
+**Every account this service creates gets its ledger wallets, `REAL` and `BONUS`, without anyone
+calling the ledger by hand** (#39). The interim decided on 2026-10-14, until there is Kafka:
+
+- a **transactional outbox**: the account's `identity.account-created` event is a row in
+  `identity_schema.outbox`, written in the transaction that creates the account;
+- a **relay**, running in every replica, that delivers each row as `POST /v1/wallets` for `REAL` and
+  then for `BONUS`, and retries until both wallets exist.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant A as Auth Service
+    participant D as identity_schema
+    participant R as Relay, every replica
+    participant K as Keycloak
+    participant L as Ledger
+
+    A->>D: one transaction: INSERT accounts, INSERT outbox
+    loop every poll-interval
+        R->>D: claim due entries and lease them (one statement)
+        R->>K: client credentials, scope ledger:write (cached)
+        R->>L: POST /v1/wallets REAL, then BONUS
+        R->>D: delivered, or failed and due after a backoff (one statement)
+    end
+```
+
+It keeps what the event design buys — creating an account never waits for the ledger, and nothing
+is lost when either side is down — and postpones one thing: until Kafka, the ledger accepts this one
+write from the identity adapter, which option A above objected to. When Kafka arrives the relay
+publishes the row to `identity.account-created.v1` instead. The table does not change: each row is
+already ADR-007's envelope.
+
+### What is written, and by whom
+
+In the service, a new account's entry is written by `Outbox.accountCreated`, and it **refuses to run
+outside a transaction** (`Propagation.MANDATORY`): committed on its own, the entry would bring back
+the gap the outbox closes. Every path that creates an account calls it in the transaction that
+inserts the anchor. Three writers work outside it, in SQL: V3's backfill and the relay's sweep, for
+accounts that already exist, and the demo seed, which inserts its account and its entry in one
+statement. The table names them all:
+
+| Path | Where the entry is written |
+| --- | --- |
+| `POST /v1/accounts` without an identity | `AccountService.create`, in its transaction |
+| `POST /v1/accounts` with one, and the repeat that finishes an interrupted create | `EndUserService.create`: the anchor and its entry are one short transaction of their own, with no Keycloak call inside |
+| Accounts that existed before V3 | V3's backfill: every account that is not `CLOSED` |
+| The demo seed, `k8s/test-users` | its SQL, in the statement that inserts the account |
+| **The account at first sign-in (#24)** | must call `Outbox.accountCreated` in the transaction that inserts its anchor — `AccountApiIT` and `EndUserApiIT` show what to assert |
+| Anything that slipped through: the previous version's accounts during a rollout, or a path that forgot | the relay's sweep, at its start and every `sweep-interval` |
+
+A replay inserts no account, so it queues nothing. An account whose entry cannot be written is not
+created: the two roll back together, and the caller's retry finds nothing half-done.
+
+**The sweep is the backstop for the rollout.** V3 is the first migration this code cannot run
+without, so the Deployment is sync wave 1, after the migration Job in wave 0: no pod of this
+version starts before the table exists. But the previous version keeps serving until its last pod
+stops, and an account it creates after V3's backfill ran gets no entry. The relay queues it — one
+`INSERT … SELECT … ON CONFLICT DO NOTHING` (`queue-missing.sql`) for every account that is not
+`CLOSED` and has no entry, run when the relay starts and every `sweep-interval` after, safe on
+several replicas at once. It normally finds nothing, and says so when it does: a warning, and
+`auth_outbox_swept_total`. Finding nothing still means reading every account, which is why it runs
+every ten minutes and not every round.
+
+`identity_schema.outbox`, from [`V3__outbox.sql`](src/main/resources/db/migration/V3__outbox.sql):
+
+| Columns | |
+| --- | --- |
+| `event_id`, `event_type`, `schema_version`, `occurred_at`, `producer_service`, `producer_version`, `correlation_id`, `causation_id`, `account_id`, `payload` | ADR-007 §3's envelope, column for field, as ADR-016 §2 stores it. `identity.account-created` 1.0.0; `occurred_at` is the account's `created_at`; `correlation_id` is the trace id of the request that created it — what its error bodies carry as `trace_id`; `causation_id`, the event that caused this one, is always `NULL` here, because a request creates an account and no event does; `payload` is `{}`, the envelope being the whole fact. Rows the backfill and the seed wrote have no `producer_version`, and those with no request at hand — backfilled, swept, seeded — no `correlation_id` |
+| `queued_at` | When the row was written: the account's `created_at` when its own transaction wrote it, later when the backfill or the sweep did. The age of the backlog is measured from here |
+| `attempts`, `next_attempt_at`, `last_attempt_at`, `last_error` | Delivery. `next_attempt_at` is also the lease, and the value a claim sets is that lease's token |
+| `delivered_at` | `NULL` until both wallets exist in the ledger, or were closed there |
+
+One account-created event per account (a partial unique index), a foreign key to `accounts`, and a
+partial index over the pending rows, which is what the relay polls. **Delivered rows stay**: V2's
+default privileges gave `auth_app` `SELECT`, `INSERT` and `UPDATE` on the new table and no `DELETE`,
+and retention is a decision of its own, not yet made.
+
+**Creating the foreign key locks `accounts` against writes until V3 commits**, backfill included:
+the previous version's account inserts and updates wait that long, which is milliseconds at today's
+size and grows with the number of accounts. V3 waits at most two seconds to take that lock
+(`lock_timeout`); past that it fails and rolls back whole, and the Job tries again, rather than hold
+every account write behind some long transaction for as long as that one takes.
+
+### The relay
+
+Every replica runs it, every `poll-interval` from the end of one round to the start of the next.
+**No transaction is ever open across a call to the ledger** — a round has three steps, and the two
+that touch the database are one short statement each:
+
+1. **Claim.** One statement selects up to `batch-size` due entries `FOR UPDATE SKIP LOCKED`, moves
+   each one's `next_attempt_at` a lease ahead, and commits. Two replicas claiming at the same moment
+   skip each other's rows, and a row another replica has leased no longer qualifies.
+2. **Deliver**, outside any transaction: `POST /v1/wallets` with `{"account_id", "type": "REAL"}`,
+   then `BONUS`, and a client-credentials token of `wallet-auth-service` asking for `ledger:write`,
+   kept until 30 seconds before it expires.
+3. **Record**, one statement per entry, and only while the entry is still under this claim's lease:
+   delivered; or failed — `attempts` counted, `last_error` set, and due again after the backoff.
+
+Within a lease, one replica delivers an entry, once. A replica that dies mid-round loses nothing:
+its entries come due again when their lease ends. A round stops starting deliveries once what is
+left of the lease is shorter than the longest one could take — two calls, each perhaps after a
+token, at the configured timeouts — so no entry is still in flight when another replica may claim
+it; the relay refuses to start with a lease too short for even one. A repeated delivery would be
+harmless anyway, because the ledger answers the opening of a wallet that exists with that wallet,
+but nothing relies on it.
+
+**An outcome is recorded only under the lease it was won under.** The arithmetic above holds for
+calls that keep to their timeouts; a replica that stalls — a long pause, a database slow to answer —
+can still outlive its lease. So the claim hands back the `next_attempt_at` it set, and each outcome
+statement requires the entry to still hold it. If another replica has claimed the entry since, the
+late outcome writes nothing and counts nothing — it would otherwise have moved that replica's lease
+and counted one attempt twice — and says so in a warning.
+
+**Done means both wallets exist**: a `201` for each that names the account and the type asked for,
+whether this call opened the wallet or an earlier one did. Nothing else counts — not a `200`, not a
+`201` about anything else — because done is final: a `LEDGER_URL` that names some other service
+fails every attempt, as an error, rather than mark entries delivered with no wallets behind them.
+`409 WALLET_CLOSED` counts as done — the account had the wallet and someone closed it, which is
+terminal — and is logged as a warning, since only a person closes a wallet. A failure on `BONUS`
+repeats `REAL` next time, which the ledger answers with the wallet it already has. An account
+closed before its entry is delivered still gets its wallets: the event is that it was created.
+
+**A `401` from the ledger drops the token** the relay showed it, so the next attempt asks Keycloak
+for a new one rather than repeat a refused token until it expires.
+
+**Backoff**: 10 seconds after the first failure, doubling, at most 15 minutes — and an entry is
+never given up on, because financial events are never dropped (ADR-007 §10). A day of failures is
+about a hundred attempts, and an entry is delivered within a quarter of an hour of the ledger
+coming back.
+
+**The sweep** runs beside the rounds, at the relay's start and every `sweep-interval`, and queues
+what [nothing else queued](#what-is-written-and-by-whom).
+
+### Configuration
+
+| Property | Environment | Default | |
+| --- | --- | --- | --- |
+| `auth.outbox.relay.enabled` | `AUTH_OUTBOX_RELAY_ENABLED` | `true`; `false` in `local`, `test` and `migrate` | The switch. Off, entries still queue; on again, everything queued is delivered |
+| `auth.ledger.url` | `LEDGER_URL` | — | The ledger's in-cluster Service, `http://ledger-service.wallet-ledger.svc`; it has no public route. Required while the relay is on |
+| `auth.ledger.timeout` | | `5s` | Connect, and then read |
+| `auth.outbox.relay.poll-interval` | `AUTH_OUTBOX_POLL_INTERVAL` | `5s` | From the end of one round to the start of the next |
+| `auth.outbox.relay.batch-size` | `AUTH_OUTBOX_BATCH_SIZE` | `20` | Due entries one round claims |
+| `auth.outbox.relay.lease` | | `2m` | Must exceed one delivery: 40 s with the default timeouts |
+| `auth.outbox.relay.initial-backoff`, `max-backoff` | | `10s`, `15m` | |
+| `auth.outbox.relay.sweep-interval` | `AUTH_OUTBOX_SWEEP_INTERVAL` | `10m` | How often the sweep runs, after once at start |
+
+The token endpoint is Keycloak's in-cluster URL (`KEYCLOAK_URL`, `/auth` included) plus
+`/realms/<realm>/protocol/openid-connect/token`, and the client is the Admin API's
+(`KEYCLOAK_CLIENT_ID`, `KEYCLOAK_CLIENT_SECRET`) — so those are required while the relay is on, **in
+either identity mode**. `ledger:write` must be an optional client scope of that client (gitops#30):
+the relay asks for it, and the Admin API's token, which does not, stays as it was.
+
+**On in production** (`k8s/deployment.yaml` sets the switch and `LEDGER_URL`), and by default, so a
+deployment that forgot the URL fails at startup rather than queueing in silence. **Off locally**:
+`compose.yaml` runs no ledger and its realm's client does not offer `ledger:write`, so every attempt
+would fail, one log line per account per backoff. Entries still queue, and with a ledger to hand,
+`AUTH_OUTBOX_RELAY_ENABLED=true` and `LEDGER_URL` deliver them. **Off in tests**, so nothing polls
+the shared database behind a test's back — `OutboxRelayIT` builds its relays against stand-ins and
+runs their rounds itself, and `OutboxRelayApplicationIT`, which runs the relay as production does to
+show the schedule works, does it in a context of its own, closed after it. **Off in the migration
+Job**, which migrates and exits.
+
+### When deliveries back up
+
+Until the ledger is deployed (wallet-ledger-service#12), every entry waits and retries. That is the
+expected state, not an incident.
+
+**Metrics**, at `/actuator/prometheus`:
+
+| Metric | |
+| --- | --- |
+| `auth_outbox_pending` | Entries not yet delivered. Read from the database at each scrape, so it is right even on a replica whose relay is off |
+| `auth_outbox_oldest_pending_seconds` | How long the oldest has waited — the one to alert on |
+| `auth_outbox_delivered_total` | Entries this replica delivered |
+| `auth_outbox_failed_total{reason}` | Failed attempts on this replica: `unavailable` mends itself, `refused` needs a person |
+| `auth_outbox_swept_total` | Accounts this replica's sweep found without an entry, and queued |
+
+**Logs.** `Outbox relay on: a round every …, a sweep every …` at startup. Per entry, `Opened the
+REAL and BONUS wallets of account …` (INFO), `Could not open the wallets of account …; retrying in
+…` (WARN, `unavailable`), or `The wallets of account … were refused … this will not heal by itself`
+(ERROR, `refused`). Each names the account, the event and the correlation id, so one search for a
+request's trace id finds its delivery attempts too. `Queued … account(s) that had no account-created
+entry` (WARN) is the sweep finding something. `Lost the lease on event …` (WARN) is a delivery that
+outlived its lease: another replica claimed the entry meanwhile and records it, and this one counted
+nothing. Once is a pause; often, the lease is too short for the timeouts.
+
+**The table**, as `auth_app` or any role that can read `identity_schema`:
+
+```sql
+-- How far behind, and since when
+SELECT count(*) AS pending, min(queued_at) AS oldest, max(attempts) AS most_attempts
+  FROM identity_schema.outbox
+ WHERE delivered_at IS NULL;
+
+-- Why: the errors, most frequent first
+SELECT last_error, count(*), max(last_attempt_at) AS last_tried, min(next_attempt_at) AS next_try
+  FROM identity_schema.outbox
+ WHERE delivered_at IS NULL
+ GROUP BY last_error
+ ORDER BY count(*) DESC;
+
+-- Once the cause is fixed, try again now rather than after the backoff: the next round takes them.
+-- Only entries due more than a lease (auth.outbox.relay.lease, 2m) from now: no lease reaches that
+-- far, so none of them is being delivered. The rest are due within the lease anyway.
+UPDATE identity_schema.outbox
+   SET next_attempt_at = now()
+ WHERE delivered_at IS NULL
+   AND next_attempt_at > now() + interval '2 minutes';
+```
+
+An account with no entry at all needs no query of its own: the sweep queues it within a
+`sweep-interval` of the relay running, and a relay that is off delivers nothing anyway.
+
+**What `last_error` means:**
+
+| `last_error` | Meaning | What to do |
+| --- | --- | --- |
+| `Upstream 'ledger' is unavailable: I/O error …` | Nothing answers at `LEDGER_URL`: the ledger is not deployed, not running, or the URL is wrong | Nothing until wallet-ledger-service#12; after that, the ledger's pods, and `LEDGER_URL` |
+| `Upstream 'ledger' is unavailable: HTTP 503 ACCOUNT_BUSY …` | Lock contention on the account in the ledger | Nothing: it retries |
+| `Upstream 'ledger' is unavailable: HTTP 5xx …` | The ledger is unwell | The ledger's logs |
+| `The ledger refused POST /v1/wallets … with HTTP 401` or `403 ACCESS_DENIED` | The ledger does not accept the token: it lacks `ledger:write`, or comes from an issuer the ledger does not trust. A `401` drops the token, so one that heals on a new token is gone by the next attempt; one that stays is configuration | gitops#30; the ledger's `OAUTH2_ISSUER_URI` |
+| `Keycloak refused the client credentials … invalid_scope …` | The client does not offer `ledger:write` | gitops#30 |
+| `Keycloak refused the client credentials … unauthorized_client` or `invalid_client` | Wrong secret, or the client's service accounts are off | `kv/wallet-auth/keycloak-client`, and the client in gitops |
+| `Keycloak's token endpoint answered HTTP 404 …`, `403 …`, a `3xx` | `KEYCLOAK_URL` without Keycloak's relative path (`/auth`), a realm that is not there, or something in front of Keycloak | `KEYCLOAK_URL`, `KEYCLOAK_REALM` |
+| `Upstream 'keycloak' is unavailable` | Keycloak did not answer, or answered `408`, `429` or `5xx` | Keycloak |
+| `Unexpected HTTP 201 … not the wallet asked for`, `Unexpected HTTP 200 …` | Something other than the ledger answers at `LEDGER_URL`, and answers yes | `LEDGER_URL` |
+| `Unexpected HTTP 400 VALIDATION_FAILED …`, `404 …` | The two services disagree about the contract, or `LEDGER_URL` names another service | `LEDGER_URL`, and the ledger's version |
+
+### Not yet
+
+- **Kafka.** The relay publishes the row to `identity.account-created.v1` (ADR-007), keyed by
+  `account_id`, and the ledger's consumer opens the wallets. architecture#3 records the interim
+  meanwhile: ADR-016, which amends ADR-007 (§11) and ADR-014 §7 to match.
+- **Retention.** Delivered rows accumulate, a few hundred bytes each, and nothing here may delete
+  them.
+- **[`docs/schema/`](docs/schema/)** is generated, and needs generating again: it still shows V1 only.
 
 ---
 
@@ -657,6 +907,14 @@ rather than being enforced on top of it. Keep it that way: folding the status ch
 `@PreAuthorize` goes on the **service** methods, not the controllers. The ledger puts them on
 controllers and its own code says they belong a layer down; this service has no such history, and
 step 2 adds a Kafka listener that must be governed by the same rules without a second copy of them.
+
+**This service now calls the ledger, with `ledger:write`.** The outbox relay's token is the
+`wallet-auth-service` client's, asking for the optional scope `ledger:write` (gitops#30). The relay
+calls `POST /v1/wallets` and nothing else, but the scope reaches further: the ledger checks scopes
+only, so whoever holds that token could also place and release holds, and freeze or close any
+wallet (the ledger's README, "Known gaps"). The token lives in this process, beside the
+realm-management credentials it already holds; a narrower scope for opening wallets would make
+"opens wallets and nothing else" a property instead of a habit.
 
 ---
 
@@ -807,6 +1065,11 @@ ADR-014's order, because each step is independently useful and the first one unb
 Nothing else in the platform depends on steps 4 or 5, which is why they are last despite being the
 part this service is named after.
 
+The `identity.account-created` producer went in ahead of step 2, as [the account-created
+outbox](#the-account-created-outbox) (#39): every account is queued with its event today, and the
+relay delivers it over HTTP as the ledger's `POST /v1/wallets` until there is Kafka. What step 2
+adds to it is the publisher.
+
 ### Deliberately not now
 
 - **A local read projection.** Rejected as ADR-014's *Alternative 1*, with the trigger recorded as
@@ -838,16 +1101,24 @@ dev.vaullet.auth
 │   │                                 v2 side by side for twelve months
 │   ├── service/                      AccountService, EndUserService, Account, AccountStatus,
 │   │                                 NewAccount, validation/ — rules, transactions, authorisation
-│   └── dao/                          AccountRepository + AccountStatements — every statement — and
-│                                     KeycloakUsers, the Admin API both slices share
+│   └── dao/                          AccountRepository + AccountStatements — every statement on the
+│                                     accounts table — and KeycloakUsers, the Admin API both slices
+│                                     share, with KeycloakTokens
+│
+├── outbox/                           ← the account-created outbox (#39)
+│   ├── service/                      Outbox, the one way an entry is written; OutboxRelay, Backoff
+│   │                                 and OutboxRelaySchedule, which deliver it
+│   └── dao/                          OutboxRepository + OutboxStatements, and LedgerWallets — the
+│                                     ledger's POST /v1/wallets, with a token of its own
 │
 └── staff/                            ← staff management (#29)
     ├── api/v1/                       StaffController + dto/
     └── service/                      StaffService, StaffMember, StaffRole — no dao of its own
 ```
 
-**The SQL is not in the Java.** `db/sql/accounts/*.sql` holds the six statements, loaded eagerly at
-startup by `AccountStatements` so a renamed file fails the context rather than an endpoint. The
+**The SQL is not in the Java.** `db/sql/accounts/*.sql` holds the six statements, and
+`db/sql/outbox/*.sql` the outbox's five, loaded eagerly at startup by `AccountStatements` and
+`OutboxStatements` so a renamed file fails the context rather than an endpoint. The
 reasoning for each one lives in the file with it, which is also where it is useful: SQL comments reach
 the server, so a statement misbehaving in `pg_stat_activity` names its own source file.
 
@@ -957,10 +1228,11 @@ runs properly in CI; `npx commitlint --from HEAD~1` checks a message without any
 
 | Profile | Activated by | What it changes |
 | --- | --- | --- |
-| *(none)* | a deployed `java -jar` | Secure by default. No `OAUTH2_ISSUER_URI` means no `JwtDecoder`, which means **the context refuses to start** rather than starting without token validation. |
-| `local` | `./mvnw spring-boot:run` | Compose-managed PostgreSQL, SQL logging, all actuators, 100% trace sampling, and the real authorisation rules granted to the anonymous principal. |
+| *(none)* | a deployed `java -jar` | Secure by default. No `OAUTH2_ISSUER_URI` means no `JwtDecoder`, which means **the context refuses to start** rather than starting without token validation. The outbox relay is on, so neither does it start without `LEDGER_URL`. |
+| `local` | `./mvnw spring-boot:run` | Compose-managed PostgreSQL, SQL logging, all actuators, 100% trace sampling, and the real authorisation rules granted to the anonymous principal. The outbox relay off: Compose runs no ledger. |
 | `prod` | the deployment | ECS structured logging, health details only when authorised, Compose off. |
-| `test` | `@IntegrationTest` | Testcontainers owns the database; Flyway still runs, so a broken migration fails the build rather than the deploy. |
+| `test` | `@IntegrationTest` | Testcontainers owns the database; Flyway still runs, so a broken migration fails the build rather than the deploy. The outbox relay off: `OutboxRelayIT` runs its own, and `OutboxRelayApplicationIT` switches it on in a context it closes after. |
+| `migrate` | the migration Job, as `prod,migrate` | No web server, Flyway on, no statement timeout, the outbox relay off, and `auth.provider: federated`, so no Keycloak client is built for a process that manages no users — without it the Job migrated and then exited 1 for want of `KEYCLOAK_URL`. The Job's manifest sets `AUTH_PROVIDER` and the relay switch as well, for images older than this profile's settings: a rollback has to get past wave 0 too. |
 
 Under `local`, `vaullet.security.local.anonymous-authorities` grants **both**
 `ROLE_SUPER_ADMIN` and `ROLE_FRAUD_REVIEWER`. That is a deliberate convenience with a deliberate
@@ -971,6 +1243,9 @@ local profile cannot.
 `auth.user-management.email-link-lifespan` (`AUTH_EMAIL_LINK_LIFESPAN`, default `72h`) is how long the
 link in an invitation or a password-reset email works. Keycloak's own default for an email an admin
 triggers is 12 hours, which kills an invitation sent on a Friday evening before Monday.
+
+The outbox relay's settings — the switch `AUTH_OUTBOX_RELAY_ENABLED`, `LEDGER_URL`, the poll
+interval, batch size, lease and backoff — are in [its own section](#configuration).
 
 Credentials come from OpenBao through External Secrets
 ([gitops](../gitops)). Nothing in this repository holds one.
@@ -987,7 +1262,7 @@ small edit somewhere else.
 | **Registration** | **Both.** Keycloak's hosted pages for self-service *and* `POST /v1/accounts` for operator-driven and bulk provisioning. An operator may use either, or both at once. | ADR-014 leaves this open and should record it. `auth.userManagement.selfRegistration` becomes a two-value setting rather than a choice between paths. |
 | **Schema name** | **`identity_schema`**, matching ADR-003 and every diagram. | ADR-006 *Database placement* says "a separate `identity` schema" — a one-word edit, and it has to happen **before the first migration runs**, because after that it is a rename. |
 | **`idempotency_key` column** | **No.** The natural keys carry it — see [Idempotency without an idempotency key](#idempotency-without-an-idempotency-key). | ADR-011 makes `Idempotency-Key` a platform rule; this endpoint's exemption needs one paragraph in ADR-014 saying why, or the next reviewer will read it as an oversight. |
-| **The ledger's account row** | **Created whenever an account is created**, by event plus idempotent upsert — see [above](#and-the-ledgers-account-row). | A new ADR-007 topic, a consumer and an upsert in the ledger, and a decision on the missing outbox. The largest item on this list by some distance. |
+| **The ledger's account row** | **Created whenever an account is created**, by event plus idempotent upsert — see [above](#and-the-ledgers-account-row). Since #39: the event is an [outbox](#the-account-created-outbox) row, and until there is Kafka the relay opens the account's `REAL` and `BONUS` wallets itself, with the ledger's `POST /v1/wallets`. | ADR-014 §7 and ADR-007 §9 to record the interim (architecture#3); then Kafka, the topic and the ledger's consumer. |
 
 ### Still open
 

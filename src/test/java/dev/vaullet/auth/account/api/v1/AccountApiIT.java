@@ -13,8 +13,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import dev.vaullet.auth.support.FailingOutbox;
 import dev.vaullet.common.test.IntegrationTest;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -77,7 +79,8 @@ class AccountApiIT {
 
     @BeforeEach
     void clean() {
-        jdbc.execute("TRUNCATE identity_schema.accounts");
+        // Together: the outbox's foreign key would refuse an accounts table emptied on its own.
+        jdbc.execute("TRUNCATE identity_schema.outbox, identity_schema.accounts");
     }
 
     /**
@@ -156,6 +159,77 @@ class AccountApiIT {
             assertThat(second).isEqualTo(first);
             Integer rows = jdbc.queryForObject("SELECT count(*) FROM identity_schema.accounts", Integer.class);
             assertThat(rows).isEqualTo(1);
+        }
+    }
+
+    /**
+     * The account-created outbox (#39), seen from the endpoint that fills it: every account created
+     * here has exactly one {@code identity.account-created} entry, written in its transaction.
+     */
+    @Nested
+    @DisplayName("POST /v1/accounts and the outbox")
+    class AccountCreatedEvent {
+
+        @Test
+        @DisplayName("queues identity.account-created with the account, correlated with the request's trace")
+        void queues_the_event() throws Exception {
+            UUID id = UUID.fromString(createAccount("acme-user-8813"));
+
+            Map<String, Object> entry = jdbc.queryForMap("""
+                    SELECT o.event_type, o.schema_version, o.producer_service, o.correlation_id,
+                           o.payload::text AS payload, o.attempts, o.delivered_at,
+                           o.occurred_at = a.created_at AS occurred_at_creation,
+                           o.next_attempt_at <= now() AS due
+                      FROM identity_schema.outbox o
+                      JOIN identity_schema.accounts a USING (account_id)
+                     WHERE o.account_id = ?""", id);
+            assertThat(entry)
+                    .containsEntry("event_type", "identity.account-created")
+                    .containsEntry("schema_version", "1.0.0")
+                    .containsEntry("producer_service", "auth-service")
+                    .containsEntry("payload", "{}")
+                    .containsEntry("attempts", 0)
+                    .containsEntry("occurred_at_creation", true)
+                    .containsEntry("due", true);
+            assertThat(entry.get("delivered_at")).isNull();
+            // The request's trace id, the one its error body would have carried as trace_id. Only its
+            // shape can be checked from here: MockMvc starts a trace of its own rather than continuing
+            // an incoming traceparent. OutboxIT checks it against the span itself.
+            assertThat((String) entry.get("correlation_id")).matches("[0-9a-f]{32}");
+        }
+
+        @Test
+        @DisplayName("a repeat queues nothing: one account, one event")
+        void repeat_queues_nothing() throws Exception {
+            String first = createAccount("acme-user-8813");
+            createAccount("acme-user-8813");
+
+            assertThat(jdbc.queryForList("SELECT account_id::text FROM identity_schema.outbox", String.class))
+                    .containsExactly(first);
+        }
+
+        @Test
+        @DisplayName("an account whose event cannot be written is not created either")
+        void no_account_without_its_event() throws Exception {
+            FailingOutbox refusing = FailingOutbox.forReference(jdbc, "acme-user-8813");
+            try {
+                mvc.perform(post("/v1/accounts").with(superAdmin())
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("{\"external_ref\": \"acme-user-8813\"}"))
+                        .andExpect(status().isInternalServerError())
+                        .andExpect(jsonPath("$.code", is("INTERNAL_ERROR")));
+            } finally {
+                refusing.close();
+            }
+
+            // The insert into accounts succeeded and was rolled back with the entry's failure.
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM identity_schema.accounts", Integer.class)).isZero();
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM identity_schema.outbox", Integer.class)).isZero();
+
+            // Nothing was left half-done, so the same request now simply succeeds — with its event.
+            String id = createAccount("acme-user-8813");
+            assertThat(jdbc.queryForList("SELECT account_id::text FROM identity_schema.outbox", String.class))
+                    .containsExactly(id);
         }
     }
 
