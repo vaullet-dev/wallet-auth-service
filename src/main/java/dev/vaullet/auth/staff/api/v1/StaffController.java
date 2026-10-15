@@ -61,6 +61,7 @@ class StaffController {
             description = "With a temporary password: at first sign-in they choose their own and set up an "
                     + "authenticator app. Repeating the request returns the same staff member.")
     @ApiResponse(responseCode = "201", description = "Created, or the original staff member replayed")
+    @ApiResponse(responseCode = "400", description = "VALIDATION_FAILED — for instance, no roles")
     @ApiResponse(responseCode = "409", description = "USERNAME_TAKEN | EMAIL_TAKEN")
     @ApiResponse(responseCode = "422", description = "IDENTITY_REJECTED — for instance, the realm's password policy")
     @ApiResponse(responseCode = "503", description = "UPSTREAM_UNAVAILABLE — Keycloak did not answer")
@@ -79,6 +80,8 @@ class StaffController {
 
     @GetMapping
     @Operation(summary = "List staff", description = "By username, a page at a time.")
+    @ApiResponse(responseCode = "400",
+            description = "VALIDATION_FAILED — a limit out of range, or a cursor this API did not issue")
     ListResponse<StaffResponse> list(@Valid @ParameterObject PageParameters page) {
         return ListResponse.of(staff.list(page.position(), page.size()), StaffResponse::from);
     }
@@ -94,6 +97,7 @@ class StaffController {
     @Operation(
             summary = "Change a staff member",
             description = "Email address, names, and whether they can sign in. Omitted fields stay as they are.")
+    @ApiResponse(responseCode = "400", description = "VALIDATION_FAILED — for instance, a blank email address")
     @ApiResponse(responseCode = "403", description = "SELF_CHANGE_FORBIDDEN — disabling yourself")
     @ApiResponse(responseCode = "404", description = "RESOURCE_NOT_FOUND")
     @ApiResponse(responseCode = "409", description = "EMAIL_TAKEN")
@@ -106,6 +110,7 @@ class StaffController {
     @Operation(
             summary = "Set a staff member's roles",
             description = "The complete set, replacing what they held. Takes effect at their next token.")
+    @ApiResponse(responseCode = "400", description = "VALIDATION_FAILED — an empty set of roles")
     @ApiResponse(responseCode = "403", description = "SELF_CHANGE_FORBIDDEN — your own roles")
     @ApiResponse(responseCode = "404", description = "RESOURCE_NOT_FOUND")
     StaffResponse replaceRoles(@PathVariable UUID id, @Valid @RequestBody StaffRolesRequest request) {

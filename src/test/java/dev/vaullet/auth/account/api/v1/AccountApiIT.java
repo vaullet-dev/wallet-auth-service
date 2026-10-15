@@ -141,7 +141,7 @@ class AccountApiIT {
                     .andExpect(status().isBadRequest())
                     .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
                     .andExpect(jsonPath("$.code", is("VALIDATION_FAILED")))
-                    .andExpect(jsonPath("$.errors[0].field", is("externalRef")));
+                    .andExpect(jsonPath("$.errors[0].field", is("external_ref")));
         }
 
         @Test

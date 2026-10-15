@@ -58,19 +58,34 @@
       A released version of backend-common, never a snapshot: this service must be able to
       rebuild the exact bytes it deployed, and a snapshot coordinate cannot promise that.
 
-      1.0.0 is the release that moved ResourceNotFoundException, ResourceConflictException and
+      1.1.x is the release that makes the OpenAPI document describe the wire (backend-common#19,
+      #41 here). swagger-core named the models with a Jackson mapper of its own, which never sees
+      the platform's snake_case, so the document said `externalRef` for a body this service reads
+      only as `external_ref`, and a body built from it in Swagger UI's "Try it out" had every
+      multi-word field ignored. Now the names in the document follow the wire; every declared
+      4xx and 5xx is documented as `application/problem+json`, the body the exception handler
+      actually sends; and a validation error's `errors[].field` names the field as the client
+      sent it — `external_ref`, `identity.first_name` — not as Java spells it. 1.1.1 rather than
+      1.1.0: 1.1.0 described the models for OpenAPI 3.0, and in the 3.1 document springdoc
+      writes, object schemas lost their `type` and the error body's fields were untyped.
+
+      Two things follow here. `errors[].field` is on the wire, so this bump changes what a
+      caller sees and is a `fix:` rather than a `deps:`. And a response is documented only if
+      the operation declares it, so every operation that validates its input declares its 400;
+      one that does not shows up in Swagger UI as "Undocumented".
+
+      1.0.0 moved ResourceNotFoundException, ResourceConflictException and
       UpstreamUnavailableException one package down, to dev.vaullet.common.error.exception
-      (backend-common#16). A moved class is binary-incompatible, so backend-common's japicmp
-      gate accepts it only as a MAJOR; the imports here changed with this version. 1.0.0 also
-      brings Swagger UI's sign-in through Keycloak: Authorize offers a `keycloak` scheme next
-      to `bearer-jwt`.
+      (backend-common#16) — a MAJOR, because a moved class is binary-incompatible — and brought
+      Swagger UI's sign-in through Keycloak: Authorize offers a `keycloak` scheme next to
+      `bearer-jwt`.
 
       The version need not match the ledger's, and is not expected to: the library moves on its
       own schedule (ADR-013), and pinning every consumer together would mean a library patch
       forces a release of every service. Bumping it here is a deliberate `deps:` commit, which
       is a PATCH — the library moving is not, by itself, a change to this service's API.
     -->
-    <common.version>1.0.0</common.version>
+    <common.version>1.1.1</common.version>
     <springdoc.version>3.1.0</springdoc.version>
     <flatten-maven-plugin.version>1.7.3</flatten-maven-plugin.version>
   </properties>
