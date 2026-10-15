@@ -72,6 +72,8 @@ class AccountController {
                     + "their own password. Repeating the request with the same external_ref returns the original "
                     + "account rather than creating a second one, so no Idempotency-Key is needed.")
     @ApiResponse(responseCode = "201", description = "Created, or the original account replayed")
+    @ApiResponse(responseCode = "400",
+            description = "VALIDATION_FAILED — for instance, no external_ref, or an identity without an email address")
     @ApiResponse(responseCode = "409",
             description = "EXTERNAL_REF_TAKEN | IDENTITY_ALREADY_LINKED | ACCOUNT_CLOSED | USERNAME_TAKEN | EMAIL_TAKEN")
     @ApiResponse(responseCode = "422",
@@ -124,6 +126,7 @@ class AccountController {
             description = "The fraud freeze, and closure. Authoritative here rather than in Keycloak: a lock "
                     + "the operator's own directory could overrule is not a lock. Closing an already-closed "
                     + "account succeeds, so a retry is safe.")
+    @ApiResponse(responseCode = "400", description = "VALIDATION_FAILED — no status")
     @ApiResponse(responseCode = "409", description = "ACCOUNT_CLOSED — closure is terminal")
     @ApiResponse(responseCode = "404", description = "RESOURCE_NOT_FOUND")
     AccountResponse updateStatus(

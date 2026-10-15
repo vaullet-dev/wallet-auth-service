@@ -93,6 +93,7 @@ class EndUserController {
             summary = "Change an account's identity",
             description = "Email address and names. Omitted fields stay as they are; a new email address is "
                     + "marked unverified.")
+    @ApiResponse(responseCode = "400", description = "VALIDATION_FAILED — for instance, a blank first_name")
     @ApiResponse(responseCode = "404", description = "RESOURCE_NOT_FOUND")
     @ApiResponse(responseCode = "409", description = "EMAIL_TAKEN | ACCOUNT_CLOSED")
     @ApiResponse(responseCode = "422", description = "IDENTITY_REJECTED")
