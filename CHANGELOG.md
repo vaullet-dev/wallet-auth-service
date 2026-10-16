@@ -1,3 +1,9 @@
+## [0.12.2](https://github.com/vaullet-dev/wallet-auth-service/compare/v0.12.1...v0.12.2) (2026-10-16)
+
+### Fixes
+
+* snake case swagger ([fdab6f3](https://github.com/vaullet-dev/wallet-auth-service/commit/fdab6f3a249c01c7fe7ad52cc17612d58518afd4))
+
 ## [0.12.1](https://github.com/vaullet-dev/wallet-auth-service/compare/v0.12.0...v0.12.1) (2026-10-15)
 
 ### Fixes
