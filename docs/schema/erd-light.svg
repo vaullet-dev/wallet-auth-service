@@ -1,47 +1,128 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="980" height="382" viewBox="0 0 980 382" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif">
-<rect width="980" height="382" fill="#F5F3EF"/>
-<rect x="20" y="20" width="940" height="196" rx="10" fill="#FFFFFF" stroke="#DFDBD2"/>
-<path d="M20 30 a10 10 0 0 1 10 -10 h920 a10 10 0 0 1 10 10 v30 h-940 z" fill="#EDEAE3"/>
-<text x="36" y="46" font-size="15" font-weight="700" fill="#1B1B2E">accounts</text>
-<text x="944" y="46" font-size="11.5" text-anchor="end" fill="#737288">identity_schema · PostgreSQL 18.6</text>
-<line x1="20" y1="60" x2="960" y2="60" stroke="#DFDBD2" stroke-width="0.7"/>
-<rect x="36" y="66" width="26" height="14" rx="3" fill="#1B1B2E"/>
-<text x="49.0" y="76.5" font-size="9" font-weight="700" text-anchor="middle" fill="#FFFFFF">PK</text>
-<text x="72" y="77" font-size="12.5" font-weight="600" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#1B1B2E">account_id</text>
-<text x="240" y="77" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#737288">uuid</text>
-<line x1="20" y1="86" x2="960" y2="86" stroke="#DFDBD2" stroke-width="0.7"/>
-<rect x="36" y="92" width="26" height="14" rx="3" fill="#1B1B2E"/>
-<text x="49.0" y="102.5" font-size="9" font-weight="700" text-anchor="middle" fill="#FFFFFF">UK</text>
-<text x="72" y="103" font-size="12.5" font-weight="600" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#1B1B2E">keycloak_sub</text>
-<text x="240" y="103" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#737288">uuid</text>
-<rect x="440" y="92" width="52" height="14" rx="7" fill="#FBEBD2"/>
-<text x="466" y="102.5" font-size="9" font-weight="700" text-anchor="middle" fill="#874A07">nullable</text>
-<line x1="20" y1="112" x2="960" y2="112" stroke="#DFDBD2" stroke-width="0.7"/>
-<rect x="36" y="118" width="26" height="14" rx="3" fill="#1B1B2E"/>
-<text x="49.0" y="128.5" font-size="9" font-weight="700" text-anchor="middle" fill="#FFFFFF">UK</text>
-<text x="72" y="129" font-size="12.5" font-weight="600" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#1B1B2E">external_ref</text>
-<text x="240" y="129" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#737288">text</text>
-<rect x="440" y="118" width="52" height="14" rx="7" fill="#FBEBD2"/>
-<text x="466" y="128.5" font-size="9" font-weight="700" text-anchor="middle" fill="#874A07">nullable</text>
-<line x1="20" y1="138" x2="960" y2="138" stroke="#DFDBD2" stroke-width="0.7"/>
-<text x="72" y="155" font-size="12.5" font-weight="600" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#1B1B2E">status</text>
-<text x="240" y="155" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#737288">text</text>
-<line x1="20" y1="164" x2="960" y2="164" stroke="#DFDBD2" stroke-width="0.7"/>
-<text x="72" y="181" font-size="12.5" font-weight="600" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#1B1B2E">created_at</text>
-<text x="240" y="181" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#737288">timestamp with time zone</text>
-<text x="508" y="181" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#737288">default now()</text>
-<line x1="20" y1="190" x2="960" y2="190" stroke="#DFDBD2" stroke-width="0.7"/>
-<text x="72" y="207" font-size="12.5" font-weight="600" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#1B1B2E">updated_at</text>
-<text x="240" y="207" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#737288">timestamp with time zone</text>
-<text x="508" y="207" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#737288">default now()</text>
-<text x="24" y="238" font-size="11" font-weight="700" letter-spacing="0.08em" fill="#737288">CHECK CONSTRAINTS</text>
-<text x="24" y="258" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#1B1B2E">accounts_external_ref_not_blank_ck</text>
-<text x="330" y="258" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#737288">CHECK (((external_ref IS NULL) OR (length(btrim(external_ref)) &gt; 0)))</text>
-<text x="24" y="278" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#1B1B2E">accounts_natural_key_ck</text>
-<text x="330" y="278" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#737288">CHECK (((external_ref IS NOT NULL) OR (keycloak_sub IS NOT NULL)))</text>
-<text x="24" y="298" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#1B1B2E">accounts_status_ck</text>
-<text x="330" y="298" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#737288">CHECK ((status = ANY (ARRAY[&#x27;ACTIVE&#x27;::text, &#x27;SUSPENDED&#x27;::text, &#x27;CLOSED&#x27;::text])))</text>
-<text x="24" y="332" font-size="11" font-weight="700" letter-spacing="0.08em" fill="#737288">TRIGGERS</text>
-<text x="24" y="352" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#1B1B2E">accounts_invariants</text>
-<text x="330" y="352" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#737288">BEFORE UPDATE · FOR EACH ROW · accounts_enforce_invariants()</text>
+<svg xmlns="http://www.w3.org/2000/svg" class="erd" viewBox="0 0 1230 507" width="1230" height="507" role="img" aria-label="Entity-relationship diagram of identity_schema in auth_db: outbox references accounts by account_id, at most one account-created event per account." xmlns:c2pa="http://c2pa.org/manifest"><metadata><c2pa:manifest>AAAWgmp1bWIAAAAeanVtZGMycGEAEQAQgAAAqgA4m3EDYzJwYQAAABZcanVtYgAAAEdqdW1kYzJtYQARABCAAACqADibcQN1cm46YzJwYTo3ZTNiMThiNC0zM2ViLTQzNWUtOGVlZi1iZjgzMTgyYzZmOWYAAAADl2p1bWIAAAApanVtZGMyYXMAEQAQgAAAqgA4m3EDYzJwYS5hc3NlcnRpb25zAAAAALxqdW1iAAAARGp1bWRjYm9yABEAEIAAAKoAOJtxE2MycGEuaW5ncmVkaWVudC52MwAAAAAYYzJzaFaei2fAlemwaPqovGEBGJoAAABwY2JvcqNpZGM6Zm9ybWF0bWltYWdlL3N2Zyt4bWxqaW5zdGFuY2VJRHgseG1wOmlpZDoyMjg4YmM3OS1mMGViLTQ5ZjEtYmQxZi00OWI2NDk2NDgyZTdscmVsYXRpb25zaGlwaHBhcmVudE9mAAAB4mp1bWIAAABBanVtZGNib3IAEQAQgAAAqgA4m3ETYzJwYS5hY3Rpb25zLnYyAAAAABhjMnNoLR+jtQ8fjN24r7mlnZTWZAAAAZljYm9yomdhY3Rpb25zgqJmYWN0aW9ua2MycGEub3BlbmVkanBhcmFtZXRlcnOha2luZ3JlZGllbnRzgaJjdXJseC1zZWxmI2p1bWJmPWMycGEuYXNzZXJ0aW9ucy9jMnBhLmluZ3JlZGllbnQudjNkaGFzaFgg4Ruhdsj7mbQ3yi2vQ3mpyNDDW5BkDqRfdzRi9aMibq+kZmFjdGlvbngdY29tLmFudGhyb3BpYy5jbGF1ZGUucHJvdmlkZWRqcGFyYW1ldGVyc6F4H2NvbS5hbnRocm9waWMub3JpZ2luLWNvbmZpZGVuY2VndW5rbm93bmtkZXNjcmlwdGlvbnhmQ2xhdWRlIHByb3ZpZGVkIHRoaXMgZmlsZSBhdCB0aGUgcmVxdWVzdCBvZiBhIHVzZXIgYW5kIG1heSBoYXZlIGNyZWF0ZWQgb3IgbW9kaWZpZWQgdGhlIGZpbGUgY29udGVudHMubXNvZnR3YXJlQWdlbnShZG5hbWVmQ2xhdWRlcmFsbEFjdGlvbnNJbmNsdWRlZPUAAADIanVtYgAAAEBqdW1kY2JvcgARABCAAACqADibcRNjMnBhLmhhc2guZGF0YQAAAAAYYzJzaIIxbH/p0Bf4UJhfarxgGSQAAACAY2JvcqVjYWxnZnNoYTI1NmNwYWRMAAAAAAAAAAAAAAAAZGhhc2hYIAOelsKYUpVp/JhhlUP/Qw51Sv3aL3k6Lfe11ID1kvCVZG5hbWVuanVtYmYgbWFuaWZlc3RqZXhjbHVzaW9uc4GiZXN0YXJ0GQFQZmxlbmd0aBkeBAAAAj5qdW1iAAAAJ2p1bWRjMmNsABEAEIAAAKoAOJtxA2MycGEuY2xhaW0udjIAAAACD2Nib3KlY2FsZ2ZzaGEyNTZpc2lnbmF0dXJleE1zZWxmI2p1bWJmPS9jMnBhL3VybjpjMnBhOjdlM2IxOGI0LTMzZWItNDM1ZS04ZWVmLWJmODMxODJjNmY5Zi9jMnBhLnNpZ25hdHVyZWppbnN0YW5jZUlEeCx4bXA6aWlkOjNmMGI3NzY3LTg3OWUtNDA2ZC1hNDFiLTlmMmRhNWRjNDdlOHJjcmVhdGVkX2Fzc2VydGlvbnODomN1cmx4LXNlbGYjanVtYmY9YzJwYS5hc3NlcnRpb25zL2MycGEuaW5ncmVkaWVudC52M2RoYXNoWCDhG6F2yPuZtDfKLa9DeanI0MNbkGQOpF93NGL1oyJur6JjdXJseCpzZWxmI2p1bWJmPWMycGEuYXNzZXJ0aW9ucy9jMnBhLmFjdGlvbnMudjJkaGFzaFggZquQ9rB1yAvjHyEEeM13Y+9rpMYRs4GFUYjRzlIBooOiY3VybHgpc2VsZiNqdW1iZj1jMnBhLmFzc2VydGlvbnMvYzJwYS5oYXNoLmRhdGFkaGFzaFggT+WvHcLyZ9/6NUI8rR7NwqmaBBrYHwevq1wzlGq3CTF0Y2xhaW1fZ2VuZXJhdG9yX2luZm+jZG5hbWVvQW50aHJvcGljIEZpbGVzZ3ZlcnNpb25lMS4wLjBrc3BlY1ZlcnNpb25lMi40LjAAABA4anVtYgAAAChqdW1kYzJjcwARABCAAACqADibcQNjMnBhLnNpZ25hdHVyZQAAABAIY2JvctKEWQISogEmGCFZAgowggIGMIIBjaADAgECAhRA5aAK7sI50L64g/oGQgU9Z1UTADAKBggqhkjOPQQDAzBJMRcwFQYDVQQKEw5BbnRocm9waWMsIFBCQzEuMCwGA1UEAxMlQW50aHJvcGljIENvbnRlbnQgQ3JlZGVudGlhbHMgUm9vdCBDQTAeFw0yNjA4MDcxODQzNTZaFw0yODA4MDYxOTQzNTZaMEQxFzAVBgNVBAoTDkFudGhyb3BpYywgUEJDMSkwJwYDVQQDEyBBbnRocm9waWMgQ2xhdWRlIENvbnRlbnQgU2lnbmluZzBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABJh6CmvLUBgFFNU0vUKlOVtE6djd17L5SuwX0LemFisBM3dkd/3cyjxFA3Qo5S46fX0/ihY0VZ7mfb9KF703t5OjWDBWMA4GA1UdDwEB/wQEAwIHgDAVBgNVHSUEDjAMBgorBgEEAYPoXgIBMAwGA1UdEwEB/wQCMAAwHwYDVR0jBBgwFoAUzlHiBIFOZFsj+OPEz5o+nMHXXMIwCgYIKoZIzj0EAwMDZwAwZAIwMXMdFJ4BetLLVY7ORuE9noqbbAZOZn/aArXyTwFAZfKrPzxF2vPoJNf1+UCdg1XGAjBwX1zd9WGqYkqmL5SFqw1QySjr1zJfpJM9+1rdDwSPLMOPOjKuiXjoU/pUUeG9RwmhY3BhZFkNngAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPZYQBPmMnuIR6vHGiXCH/2odpubXN9scc8jpJWleyWBi6ZlbCd6RFLMYzCA6tTvRKG0ndcA3e27w4W+qbOlMM+qAmc=</c2pa:manifest></metadata>
+<style>
+  .tname, .cname, .ctype, .ctype-l, .mk, .mk-pk, .elabel { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", monospace; }
+  .plabel, .psub, .tcount, .foot, .rlabel, .rlabel2, .lhead, .ltext { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .panel.auth { fill: #E8EDF3; } .panel.ledger { fill: #E7EEE8; }
+  .plabel { font-size: 16px; font-weight: 600; fill: #18231E; }
+  .psub { font-size: 12px; fill: #56655D; }
+  .card { fill: #FFFFFF; stroke: #B8C4BD; stroke-width: 1; }
+  .head.auth { fill: #D9E2EE; } .head.ledger { fill: #D6E6DB; }
+  .tname { font-size: 13px; font-weight: 600; fill: #18231E; }
+  .tcount { font-size: 10.5px; fill: #6A7A71; }
+  .hair { stroke: #D2DBD5; stroke-width: 1; }
+  .cname { font-size: 12px; fill: #1E2B25; } .pkname { font-weight: 600; }
+  .ctype, .ctype-l { font-size: 12px; fill: #6A7A71; }
+  .mk-pk { font-size: 9.5px; font-weight: 700; fill: #0E6A4C; letter-spacing: .04em; }
+  .mk { font-size: 9.5px; font-weight: 600; fill: #6A7A71; letter-spacing: .04em; }
+  .foot { font-size: 11px; font-style: italic; fill: #56655D; }
+  .edge { fill: none; stroke: #7E8C84; stroke-width: 1.3; stroke-linejoin: round; }
+  .mark { stroke: #7E8C84; stroke-width: 1.3; } .mark-o { fill: #FFFFFF; stroke: #7E8C84; stroke-width: 1.3; }
+  .elabel { font-size: 10.5px; fill: #56655D; }
+  .relay { fill: none; stroke: #B5531A; stroke-width: 1.6; stroke-dasharray: 6 4; }
+  .relay-head, .relay-dot { fill: #B5531A; }
+  .rlabel { font-size: 12px; font-weight: 600; fill: #A14813; }
+  .rlabel2 { font-size: 11.5px; fill: #A14813; }
+  .lhead { font-size: 12px; font-weight: 600; fill: #18231E; letter-spacing: .06em; text-transform: uppercase; }
+  .ltext { font-size: 12px; fill: #3B4A42; }
+</style>
+<rect x="0" y="0" width="1230" height="507" fill="#F2F5F1"/>
+<rect class="panel auth" x="20" y="20" width="790" height="467" rx="10"/>
+<text class="plabel" x="40" y="50">auth_db</text>
+<text class="psub" x="126" y="50">cluster platform · schema identity_schema · owner auth_migrator · wallet-auth-service</text>
+<path class="edge" d="M480.0,263.5 L431.0,263.5 Q425.0,263.5 425.0,257.5 L425.0,117.5 Q425.0,111.5 419.0,111.5 L370.0,111.5"/>
+<line class="mark" x1="473.0" y1="257.5" x2="473.0" y2="269.5"/><circle class="mark-o" cx="465.0" cy="263.5" r="3.6"/>
+<line class="mark" x1="377.0" y1="117.5" x2="377.0" y2="105.5"/><line class="mark" x1="381.0" y1="117.5" x2="381.0" y2="105.5"/>
+<g class="tbl">
+<rect class="card" x="70" y="72" width="300" height="220" rx="6"/>
+<path class="head auth" d="M70,102 V78 Q70,72 76,72 H364 Q370,72 370,78 V102 Z"/>
+<text class="tname" x="82" y="92">accounts</text>
+<text class="tcount" x="360" y="92" text-anchor="end">6 columns</text>
+<line class="hair" x1="70" y1="102" x2="370" y2="102"/>
+<text class="mk-pk" x="79" y="115.0">PK</text>
+<text class="cname pkname" x="116" y="115.5">account_id</text>
+<text class="ctype" x="360" y="115.5" text-anchor="end">uuid</text>
+<text class="mk" x="79" y="134.0">UQ</text>
+<text class="cname" x="116" y="134.5">keycloak_sub</text>
+<text class="ctype" x="360" y="134.5" text-anchor="end">uuid?</text>
+<text class="mk" x="79" y="153.0">UQ</text>
+<text class="cname" x="116" y="153.5">external_ref</text>
+<text class="ctype" x="360" y="153.5" text-anchor="end">text?</text>
+<text class="cname" x="116" y="172.5">status</text>
+<text class="ctype" x="360" y="172.5" text-anchor="end">text</text>
+<text class="cname" x="116" y="191.5">created_at</text>
+<text class="ctype" x="360" y="191.5" text-anchor="end">timestamptz</text>
+<text class="cname" x="116" y="210.5">updated_at</text>
+<text class="ctype" x="360" y="210.5" text-anchor="end">timestamptz</text>
+<line class="hair" x1="80" y1="220" x2="360" y2="220"/>
+<text class="foot" x="82" y="235">status: ACTIVE · SUSPENDED · CLOSED</text>
+<text class="foot" x="82" y="250">external_ref or keycloak_sub required</text>
+<text class="foot" x="82" y="265">trigger: external_ref fixed once set</text>
+<text class="foot" x="82" y="280">trigger: CLOSED is final</text>
+</g>
+<g class="tbl">
+<rect class="card" x="480" y="72" width="300" height="395" rx="6"/>
+<path class="head auth" d="M480,102 V78 Q480,72 486,72 H774 Q780,72 780,78 V102 Z"/>
+<text class="tname" x="492" y="92">outbox</text>
+<text class="tcount" x="770" y="92" text-anchor="end">16 columns</text>
+<line class="hair" x1="480" y1="102" x2="780" y2="102"/>
+<text class="mk-pk" x="489" y="115.0">PK</text>
+<text class="cname pkname" x="526" y="115.5">event_id</text>
+<text class="ctype" x="770" y="115.5" text-anchor="end">uuid</text>
+<text class="cname" x="526" y="134.5">event_type</text>
+<text class="ctype" x="770" y="134.5" text-anchor="end">text</text>
+<text class="cname" x="526" y="153.5">schema_version</text>
+<text class="ctype" x="770" y="153.5" text-anchor="end">text</text>
+<text class="cname" x="526" y="172.5">occurred_at</text>
+<text class="ctype" x="770" y="172.5" text-anchor="end">timestamptz</text>
+<text class="cname" x="526" y="191.5">producer_service</text>
+<text class="ctype" x="770" y="191.5" text-anchor="end">text</text>
+<text class="cname" x="526" y="210.5">producer_version</text>
+<text class="ctype" x="770" y="210.5" text-anchor="end">text?</text>
+<text class="cname" x="526" y="229.5">correlation_id</text>
+<text class="ctype" x="770" y="229.5" text-anchor="end">text?</text>
+<text class="cname" x="526" y="248.5">causation_id</text>
+<text class="ctype" x="770" y="248.5" text-anchor="end">text?</text>
+<text class="mk" x="489" y="267.0">FK</text>
+<text class="cname" x="526" y="267.5">account_id</text>
+<text class="ctype" x="770" y="267.5" text-anchor="end">uuid</text>
+<text class="cname" x="526" y="286.5">payload</text>
+<text class="ctype" x="770" y="286.5" text-anchor="end">jsonb</text>
+<text class="cname" x="526" y="305.5">queued_at</text>
+<text class="ctype" x="770" y="305.5" text-anchor="end">timestamptz</text>
+<text class="cname" x="526" y="324.5">attempts</text>
+<text class="ctype" x="770" y="324.5" text-anchor="end">integer</text>
+<text class="cname" x="526" y="343.5">next_attempt_at</text>
+<text class="ctype" x="770" y="343.5" text-anchor="end">timestamptz</text>
+<text class="cname" x="526" y="362.5">last_attempt_at</text>
+<text class="ctype" x="770" y="362.5" text-anchor="end">timestamptz?</text>
+<text class="cname" x="526" y="381.5">last_error</text>
+<text class="ctype" x="770" y="381.5" text-anchor="end">text?</text>
+<text class="cname" x="526" y="400.5">delivered_at</text>
+<text class="ctype" x="770" y="400.5" text-anchor="end">timestamptz?</text>
+<line class="hair" x1="490" y1="410" x2="770" y2="410"/>
+<text class="foot" x="492" y="425">≤ 1 identity.account-created per account</text>
+<text class="foot" x="492" y="440">relay retries until delivered_at is set</text>
+<text class="foot" x="492" y="455">attempts ≥ 0 · payload is a JSON object</text>
+</g>
+<text class="lhead" x="900" y="76">Legend</text>
+<text class="mk-pk" x="900" y="100">PK</text><text class="ltext" x="944" y="100">primary key</text>
+<text class="mk" x="900" y="120">FK</text><text class="ltext" x="944" y="120">foreign key</text>
+<text class="mk" x="900" y="140">UQ</text><text class="ltext" x="944" y="140">unique on its own</text>
+<text class="ctype-l" x="900" y="160">text?</text><text class="ltext" x="944" y="160">nullable column</text>
+<path class="edge" d="M900,184 H934"/>
+<line class="mark" x1="913.0" y1="184.0" x2="900.0" y2="177.0"/><line class="mark" x1="913.0" y1="184.0" x2="900.0" y2="184.0"/><line class="mark" x1="913.0" y1="184.0" x2="900.0" y2="191.0"/><line class="mark" x1="917.0" y1="190.0" x2="917.0" y2="178.0"/>
+<text class="ltext" x="944" y="188">many (the table holding the key)</text>
+<path class="edge" d="M900,206 H934"/>
+<line class="mark" x1="927.0" y1="200.0" x2="927.0" y2="212.0"/><line class="mark" x1="923.0" y1="200.0" x2="923.0" y2="212.0"/>
+<text class="ltext" x="944" y="210">exactly one</text>
+<path class="edge" d="M900,228 H934"/>
+<line class="mark" x1="927.0" y1="222.0" x2="927.0" y2="234.0"/><circle class="mark-o" cx="919.0" cy="228.0" r="3.6"/>
+<text class="ltext" x="944" y="232">zero or one</text>
+<text class="lhead" x="900" y="268">Not drawn</text>
+<text class="ltext" x="900" y="290">flyway_schema_history</text>
+<text class="ltext" x="900" y="308">Keycloak&#x27;s own tables in auth_db</text>
+<text class="lhead" x="900" y="348">Source</text>
+<text class="ltext" x="900" y="370">PostgreSQL 18.6, after Flyway V1–V3</text>
+<text class="ltext" x="900" y="388">wallet-auth-service 43d0615 (0.12.2)</text>
+<text class="ltext" x="900" y="406">roles and owners as in gitops apps/db</text>
 </svg>
