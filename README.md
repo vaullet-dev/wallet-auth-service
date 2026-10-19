@@ -402,8 +402,8 @@ each `CHECK` into, the trigger timing — rather than what the DDL appears to sa
 is [`V1__identity.sql`](src/main/resources/db/migration/V1__identity.sql).
 
 Since V3 the schema holds a second table, `outbox`: each account's `identity.account-created` event,
-written with it — see [The account-created outbox](#the-account-created-outbox). `docs/schema/` has
-not been generated again since V1.
+written with it — see [The account-created outbox](#the-account-created-outbox). `docs/schema/`
+covers V1–V3, both tables.
 
 ```sql
 CREATE TABLE accounts (
@@ -826,7 +826,6 @@ An account with no entry at all needs no query of its own: the sweep queues it w
   meanwhile: ADR-016, which amends ADR-007 (§11) and ADR-014 §7 to match.
 - **Retention.** Delivered rows accumulate, a few hundred bytes each, and nothing here may delete
   them.
-- **[`docs/schema/`](docs/schema/)** is generated, and needs generating again: it still shows V1 only.
 
 ---
 
