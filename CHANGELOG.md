@@ -1,3 +1,9 @@
+## [0.13.0](https://github.com/vaullet-dev/wallet-auth-service/compare/v0.12.2...v0.13.0) (2026-10-23)
+
+### Features
+
+* account on first sign in ([5c1b956](https://github.com/vaullet-dev/wallet-auth-service/commit/5c1b956c6219e43ec8ba8c5c17eb72b5c5ceb1b3))
+
 ## [0.12.2](https://github.com/vaullet-dev/wallet-auth-service/compare/v0.12.1...v0.12.2) (2026-10-16)
 
 ### Fixes
