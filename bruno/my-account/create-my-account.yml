@@ -1,0 +1,42 @@
+info:
+  name: Create my account
+  type: http
+  seq: 1
+
+http:
+  method: PUT
+  url: "{{base_url}}/v1/accounts/me"
+  auth: inherit
+
+runtime:
+  scripts:
+    - type: before-request
+      code: |-
+        if (bru.getEnvName() === "local") {
+          bru.runner.skipRequest();
+        }
+    - type: after-response
+      code: |-
+        if (res.status === 200 || res.status === 201) {
+          bru.setVar("my_account_id", res.body.account_id);
+        }
+  assertions:
+    - expression: res.status
+      operator: in
+      value: 200, 201
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+  forwardAuthorizationHeader: true
+
+docs: |-
+  Creates the account of whoever is signed in, writes its `account_id` onto their Keycloak user and
+  grants `END_USER`; the outbox then opens the `REAL` and `BONUS` wallets. `201` the first time, `200`
+  with the same account after that, so it is safe to send at every sign-in. No body.
+
+  The token used here does not change: *Clear Cache* and sign in again (or let Bruno refresh it) for
+  one that carries `account_id`. `409 EMAIL_NOT_VERIFIED` means the address is not verified yet.
+  Keeps `my_account_id`.

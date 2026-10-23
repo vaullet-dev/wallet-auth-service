@@ -1,0 +1,20 @@
+info:
+  name: My account
+  type: folder
+  seq: 3
+
+request:
+  auth: inherit
+
+docs:
+  content: |-
+    The signed-in end user's own account: `PUT` creates it at their first sign-in, `GET` reads it back.
+    Both act on whoever the token names, and need only the `identity:self` scope.
+
+    Sign in as an end user, not staff: somebody who registered on Keycloak's sign-in page and verified
+    their address, or `test-end-user`. *Clear Cache* in the collection's Auth tab drops the token you
+    have. As `test-super-admin` these answer `403 STAFF_ACCOUNT_FORBIDDEN`.
+
+    Skipped under **local**: the `local` profile's anonymous principal holds every scope and is nobody,
+    so it has no account of its own.
+  type: text/markdown

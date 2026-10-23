@@ -22,6 +22,7 @@ import dev.vaullet.auth.common.error.exception.EmailNotVerifiedException;
 import dev.vaullet.auth.common.error.exception.EmailTakenException;
 import dev.vaullet.auth.common.error.exception.ExternalRefTakenException;
 import dev.vaullet.auth.common.error.exception.IdentityAlreadyLinkedException;
+import dev.vaullet.auth.common.error.exception.StaffAccountForbiddenException;
 import dev.vaullet.auth.common.error.exception.UsernameTakenException;
 import dev.vaullet.auth.common.paging.Slice;
 import dev.vaullet.auth.config.AuthProperties;
@@ -44,6 +45,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.transaction.support.TransactionOperations;
 
 /**
@@ -307,6 +310,225 @@ class EndUserServiceTest {
             when(keycloak.findById(SUB)).thenReturn(Optional.of(user(SUB, USERNAME, EMAIL, ACCOUNT)));
 
             assertThatThrownBy(() -> service.create(command())).isInstanceOf(AccountClosedException.class);
+            verify(keycloak, never()).grantRealmRole(any(), any());
+        }
+    }
+
+    /**
+     * {@code PUT /v1/accounts/me}. The caller is somebody who registered on Keycloak's pages: a realm
+     * user with no {@code account_id} and no role, until this call.
+     */
+    @Nested
+    @DisplayName("createOwn")
+    class CreateOwn {
+
+        /** Somebody who registered and verified their address: no account_id, no staff role. */
+        private void registered(KeycloakUser user) {
+            when(keycloak.findById(SUB)).thenReturn(Optional.of(user));
+            when(keycloak.isStaff(SUB)).thenReturn(false);
+            when(keycloak.effectiveRealmRoles(SUB)).thenReturn(List.of("default-roles-vaullet", "offline_access"));
+        }
+
+        @Test
+        @DisplayName("the anchor and its outbox entry first, then account_id on the Keycloak user, then END_USER")
+        void creates_in_order() {
+            registered(verified(user(SUB, USERNAME, EMAIL, null)));
+            when(accounts.findByKeycloakSub(SUB)).thenReturn(Optional.empty());
+            when(accounts.insert(any(), eq(SUB), eq(null), eq("ACTIVE")))
+                    .thenAnswer(call -> row(call.getArgument(0), SUB, null, "ACTIVE"));
+            when(keycloak.writeAccountId(eq(SUB), any())).thenReturn(true);
+
+            OwnAccount own = service.createOwn(SUB);
+
+            assertThat(own.created()).isTrue();
+            Account account = own.account();
+            assertThat(account.getKeycloakSub()).contains(SUB);
+            assertThat(account.getExternalRef()).isEmpty();
+            assertThat(account.getStatus()).isEqualTo(AccountStatus.ACTIVE);
+
+            InOrder order = inOrder(keycloak, accounts, outbox);
+            order.verify(keycloak).requireAccountIdEditableByAdminsOnly();
+            order.verify(accounts).insert(account.getAccountId(), SUB, null, "ACTIVE");
+            // In the anchor's transaction, so the ledger hears of the account even if Keycloak is
+            // down for the two writes after it.
+            order.verify(outbox).accountCreated(account.getAccountId(), account.getCreatedAt());
+            // The anchor's id is what the token will carry.
+            order.verify(keycloak).writeAccountId(SUB, account.getAccountId());
+            order.verify(keycloak).grantRealmRole(SUB, "END_USER");
+        }
+
+        @Test
+        @DisplayName("repeated once done, it answers with the same account and writes nothing new")
+        void repeat_of_a_finished_call() {
+            registered(verified(user(SUB, USERNAME, EMAIL, ACCOUNT)));
+            when(accounts.findByKeycloakSub(SUB)).thenReturn(Optional.of(row(ACCOUNT, SUB, null, "ACTIVE")));
+
+            OwnAccount own = service.createOwn(SUB);
+
+            assertThat(own.created()).isFalse();
+            assertThat(own.account().getAccountId()).isEqualTo(ACCOUNT);
+            verify(accounts, never()).insert(any(), any(), any(), any());
+            verifyNoInteractions(outbox);
+            verify(keycloak, never()).writeAccountId(any(), any());
+            // Granting a role the user holds is a no-op in Keycloak.
+            verify(keycloak).grantRealmRole(SUB, "END_USER");
+        }
+
+        @Test
+        @DisplayName("repeated after a call that stopped at the commit, it writes account_id and grants END_USER")
+        void repeat_finishes_an_interrupted_call() {
+            registered(verified(user(SUB, USERNAME, EMAIL, null)));
+            when(accounts.findByKeycloakSub(SUB)).thenReturn(Optional.of(row(ACCOUNT, SUB, null, "ACTIVE")));
+            when(keycloak.writeAccountId(SUB, ACCOUNT)).thenReturn(true);
+
+            OwnAccount own = service.createOwn(SUB);
+
+            assertThat(own.created()).isFalse();
+            assertThat(own.account().getAccountId()).isEqualTo(ACCOUNT);
+            verify(accounts, never()).insert(any(), any(), any(), any());
+            verifyNoInteractions(outbox);
+            InOrder order = inOrder(keycloak);
+            order.verify(keycloak).writeAccountId(SUB, ACCOUNT);
+            order.verify(keycloak).grantRealmRole(SUB, "END_USER");
+        }
+
+        @Test
+        @DisplayName("the anchor wins over an account_id that disagrees with it")
+        void stale_account_id_is_overwritten() {
+            UUID orphan = UUID.fromString("dddddddd-0000-0000-0000-000000000009");
+            registered(verified(user(SUB, USERNAME, EMAIL, orphan)));
+            when(accounts.findByKeycloakSub(SUB)).thenReturn(Optional.of(row(ACCOUNT, SUB, null, "ACTIVE")));
+            when(keycloak.writeAccountId(SUB, ACCOUNT)).thenReturn(true);
+
+            service.createOwn(SUB);
+
+            verify(keycloak).writeAccountId(SUB, ACCOUNT);
+        }
+
+        @Test
+        @DisplayName("a repeat does not ask for a verified address: the account exists, and only gets finished")
+        void repeat_with_an_unverified_address() {
+            registered(user(SUB, USERNAME, EMAIL, ACCOUNT));
+            when(accounts.findByKeycloakSub(SUB)).thenReturn(Optional.of(row(ACCOUNT, SUB, null, "ACTIVE")));
+
+            assertThat(service.createOwn(SUB).account().getAccountId()).isEqualTo(ACCOUNT);
+        }
+
+        @Test
+        @DisplayName("losing a race to a concurrent call answers with the winner's account, created by it")
+        void lost_race() {
+            registered(verified(user(SUB, USERNAME, EMAIL, null)));
+            when(accounts.findByKeycloakSub(SUB))
+                    .thenReturn(Optional.empty())
+                    .thenReturn(Optional.of(row(ACCOUNT, SUB, null, "ACTIVE")));
+            when(accounts.insert(any(), eq(SUB), eq(null), eq("ACTIVE")))
+                    .thenThrow(new DuplicateKeyException("accounts_keycloak_sub_uk"));
+            when(keycloak.writeAccountId(SUB, ACCOUNT)).thenReturn(true);
+
+            OwnAccount own = service.createOwn(SUB);
+
+            assertThat(own.created()).isFalse();
+            assertThat(own.account().getAccountId()).isEqualTo(ACCOUNT);
+            // The insert failed before the entry: the winner queued the one there is.
+            verifyNoInteractions(outbox);
+            verify(keycloak).writeAccountId(SUB, ACCOUNT);
+            verify(keycloak).grantRealmRole(SUB, "END_USER");
+        }
+
+        @Test
+        @DisplayName("refuses a member of the staff group before anything is written")
+        void refuses_staff_group() {
+            when(keycloak.findById(SUB)).thenReturn(Optional.of(verified(user(SUB, USERNAME, EMAIL, null))));
+            when(keycloak.isStaff(SUB)).thenReturn(true);
+
+            assertThatThrownBy(() -> service.createOwn(SUB))
+                    .isInstanceOf(StaffAccountForbiddenException.class);
+            verifyNoInteractions(accounts, outbox);
+            verify(keycloak, never()).writeAccountId(any(), any());
+            verify(keycloak, never()).grantRealmRole(any(), any());
+        }
+
+        @Test
+        @DisplayName("refuses somebody holding a staff role outside the group: they could administer other accounts")
+        void refuses_staff_role() {
+            when(keycloak.findById(SUB)).thenReturn(Optional.of(verified(user(SUB, USERNAME, EMAIL, null))));
+            when(keycloak.isStaff(SUB)).thenReturn(false);
+            when(keycloak.effectiveRealmRoles(SUB)).thenReturn(List.of("default-roles-vaullet", "SUPPORT_AGENT"));
+
+            assertThatThrownBy(() -> service.createOwn(SUB))
+                    .isInstanceOf(StaffAccountForbiddenException.class);
+            verifyNoInteractions(accounts, outbox);
+            verify(keycloak, never()).grantRealmRole(any(), any());
+        }
+
+        @Test
+        @DisplayName("refuses a new account for an unverified address, before anything is written")
+        void refuses_unverified() {
+            registered(user(SUB, USERNAME, EMAIL, null));
+            when(accounts.findByKeycloakSub(SUB)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> service.createOwn(SUB)).isInstanceOf(EmailNotVerifiedException.class);
+            verify(accounts, never()).insert(any(), any(), any(), any());
+            verifyNoInteractions(outbox);
+            verify(keycloak, never()).writeAccountId(any(), any());
+            verify(keycloak, never()).grantRealmRole(any(), any());
+        }
+
+        @Test
+        @DisplayName("refuses a closed account, and grants nothing")
+        void refuses_closed() {
+            registered(verified(user(SUB, USERNAME, EMAIL, ACCOUNT)));
+            when(accounts.findByKeycloakSub(SUB)).thenReturn(Optional.of(row(ACCOUNT, SUB, null, "CLOSED")));
+
+            assertThatThrownBy(() -> service.createOwn(SUB)).isInstanceOf(AccountClosedException.class);
+            verify(keycloak, never()).grantRealmRole(any(), any());
+        }
+
+        @Test
+        @DisplayName("refuses a user with no email address at all, such as a client's service account")
+        void refuses_no_email() {
+            KeycloakUser serviceAccount = new KeycloakUser(SUB, "service-account-ledger-ops", null, null, null, false,
+                    true, 0L, Map.of(), List.of());
+            registered(serviceAccount);
+            when(accounts.findByKeycloakSub(SUB)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> service.createOwn(SUB)).isInstanceOf(EmailNotVerifiedException.class);
+            verify(accounts, never()).insert(any(), any(), any(), any());
+            verifyNoInteractions(outbox);
+        }
+
+        @Test
+        @DisplayName("refuses a disabled user, whose token outlived the switch")
+        void refuses_disabled() {
+            KeycloakUser disabled = new KeycloakUser(SUB, USERNAME, EMAIL, "Jane", "Doe", true, false, 0L, Map.of(),
+                    List.of());
+            when(keycloak.findById(SUB)).thenReturn(Optional.of(disabled));
+
+            assertThatThrownBy(() -> service.createOwn(SUB))
+                    .isInstanceOf(AccessDeniedException.class);
+            verifyNoInteractions(accounts, outbox);
+        }
+
+        @Test
+        @DisplayName("refuses a token for a user Keycloak no longer has")
+        void refuses_unknown_user() {
+            when(keycloak.findById(SUB)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> service.createOwn(SUB))
+                    .isInstanceOf(AccessDeniedException.class);
+            verifyNoInteractions(accounts, outbox);
+        }
+
+        @Test
+        @DisplayName("404s when Keycloak loses the user between the commit and the write-back, and the repeat heals")
+        void user_gone_before_the_write_back() {
+            registered(verified(user(SUB, USERNAME, EMAIL, null)));
+            when(accounts.findByKeycloakSub(SUB)).thenReturn(Optional.empty());
+            when(accounts.insert(any(), eq(SUB), eq(null), eq("ACTIVE")))
+                    .thenAnswer(call -> row(call.getArgument(0), SUB, null, "ACTIVE"));
+            when(keycloak.writeAccountId(eq(SUB), any())).thenReturn(false);
+
+            assertThatThrownBy(() -> service.createOwn(SUB)).isInstanceOf(ResourceNotFoundException.class);
             verify(keycloak, never()).grantRealmRole(any(), any());
         }
     }

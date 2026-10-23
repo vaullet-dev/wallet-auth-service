@@ -11,17 +11,21 @@ import dev.vaullet.auth.common.error.exception.EmailNotVerifiedException;
 import dev.vaullet.auth.common.error.exception.EmailTakenException;
 import dev.vaullet.auth.common.error.exception.ExternalRefTakenException;
 import dev.vaullet.auth.common.error.exception.IdentityAlreadyLinkedException;
+import dev.vaullet.auth.common.error.exception.StaffAccountForbiddenException;
 import dev.vaullet.auth.common.error.exception.UsernameTakenException;
 import dev.vaullet.auth.common.paging.Slice;
 import dev.vaullet.auth.config.AuthProperties;
 import dev.vaullet.auth.outbox.service.Outbox;
+import dev.vaullet.auth.staff.service.StaffRole;
 import dev.vaullet.common.error.exception.ResourceNotFoundException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -29,6 +33,8 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionOperations;
@@ -66,6 +72,10 @@ import org.springframework.transaction.support.TransactionOperations;
  * {@code external_ref}: it carries an {@code account_id} no anchor has. It holds no role, so it can
  * do nothing, and ADR-014's scheduled report of realm users without an anchor is where it surfaces.
  *
+ * <p>The other way in is {@link #createOwn}, the account at first sign-in (#24): somebody who
+ * registered on Keycloak's own pages exists there first, and gets their account when they first
+ * sign in to the app. Its order is this one turned round, and its comment says why.
+ *
  * <p>Only registered with {@code auth.provider: local}. Authorisation sits here, as it does on
  * {@link AccountService}, and for the same reason.
  */
@@ -75,6 +85,10 @@ public class EndUserService {
 
     /** The realm role every account created here gets, and the only one: this service makes end users. */
     static final String END_USER = "END_USER";
+
+    /** The realm roles that make somebody staff even outside the {@code staff} group: ADR-006's, bar END_USER. */
+    private static final Set<String> STAFF_ROLES =
+            Arrays.stream(StaffRole.values()).map(Enum::name).collect(Collectors.toUnmodifiableSet());
 
     private static final Logger log = LoggerFactory.getLogger(EndUserService.class);
 
@@ -147,6 +161,85 @@ public class EndUserService {
         keycloak.grantRealmRole(subject, END_USER);
         sendSetPasswordLink(accountId, subject);
         return account;
+    }
+
+    /**
+     * The caller's own account, created at their first sign-in if they have none yet:
+     * {@code PUT /v1/accounts/me} (#24).
+     *
+     * <p>For somebody who registered on Keycloak's own pages (gitops#21), or who will arrive through
+     * Google (gitops#19): a realm user with no account, no {@code account_id} and no role. Here the
+     * Keycloak user exists first, so the order is {@link #create}'s turned round:
+     *
+     * <ol>
+     *   <li>Keycloak is asked who the caller is, now, and before anything is written the caller is
+     *       refused if they are disabled, staff ({@code STAFF_ACCOUNT_FORBIDDEN}: a member of the
+     *       {@code staff} group, or holding a staff role) or — for a new account — unverified
+     *       ({@code EMAIL_NOT_VERIFIED}). The token is not asked: a role granted a minute ago is not
+     *       in it yet. A client's service account, the user behind a client-credentials token, is
+     *       refused by the last rule: it has no email address. Keycloak 26's Admin API does not say
+     *       a user is one ({@code serviceAccountClientLink} never comes back), so nothing here could.
+     *   <li>The anchor is inserted, with the caller's id as {@code keycloak_sub} and no
+     *       {@code external_ref}, together with its {@code identity.account-created} entry, in one
+     *       transaction (#39). This is the commit point: from here the account exists, and the
+     *       outbox opens its {@code REAL} and {@code BONUS} wallets.
+     *   <li>{@code account_id} is written onto the Keycloak user, so their next token carries it.
+     *   <li>{@code END_USER} is granted.
+     * </ol>
+     *
+     * <p><b>Safe to repeat, and the repeat is the recovery.</b> A call that stopped after the commit
+     * finds the account by {@code keycloak_sub} the next time and finishes steps 3 and 4, each a no-op
+     * once done, so a repeat of a call long finished changes nothing. Two calls at once, a double
+     * click, both reach the insert; the unique key on {@code keycloak_sub} refuses the second, which
+     * answers with the first one's account. The anchor, not the attribute, says which account is the
+     * user's: an {@code account_id} that disagrees with it is overwritten.
+     *
+     * <p>Not {@code @Transactional}, like {@link #create}: Keycloak is called before and after the
+     * one transaction, never inside it.
+     *
+     * @param subject the caller's Keycloak user id; {@link AccountAccess#SELF} checks it is theirs
+     * @return the account, and whether this call created it
+     */
+    @PreAuthorize(AccountAccess.SELF)
+    public OwnAccount createOwn(UUID subject) {
+        KeycloakUser user = keycloak.findById(subject)
+                .orElseThrow(() -> new AccessDeniedException("Keycloak has no user for this token"));
+        if (!user.enabled()) {
+            throw new AccessDeniedException("Your Keycloak user is disabled");
+        }
+        if (isStaff(subject)) {
+            log.warn("Refused Keycloak user {} an account of their own: staff", subject);
+            throw new StaffAccountForbiddenException();
+        }
+        keycloak.requireAccountIdEditableByAdminsOnly();
+
+        Optional<AccountRow> existing = accounts.findByKeycloakSub(subject);
+        if (existing.isPresent()) {
+            Account account = AccountService.toDomain(existing.get());
+            if (account.getStatus() == AccountStatus.CLOSED) {
+                throw new AccountClosedException(account.getAccountId());
+            }
+            return new OwnAccount(finishOwn(account, user), false);
+        }
+
+        if (!user.emailVerified()) {
+            throw EmailNotVerifiedException.beforeOwnAccount();
+        }
+        Account account;
+        boolean created;
+        try {
+            account = insertAnchor(UUID.randomUUID(), subject, null);
+            created = true;
+        } catch (DuplicateKeyException lostRace) {
+            // Another call for the same user committed first; Postgres made this insert wait for it.
+            account = accounts.findByKeycloakSub(subject).map(AccountService::toDomain).orElseThrow(() -> lostRace);
+            created = false;
+        }
+        finishOwn(account, user);
+        if (created) {
+            log.info("Opened account {} for Keycloak user {} at their first sign-in", account.getAccountId(), subject);
+        }
+        return new OwnAccount(account, created);
     }
 
     /** The account's identity, read from Keycloak now. */
@@ -293,7 +386,7 @@ public class EndUserService {
      * both rows or neither (#39). Only the two statements are inside it; Keycloak is called before
      * and after, never while a connection is held.
      */
-    private Account insertAnchor(UUID accountId, UUID subject, String externalRef) {
+    private Account insertAnchor(UUID accountId, UUID subject, @Nullable String externalRef) {
         @Nullable AccountRow row = transactions.execute(status -> {
             AccountRow inserted = accounts.insert(accountId, subject, externalRef, AccountStatus.ACTIVE.name());
             outbox.accountCreated(inserted.getAccountId(), inserted.getCreatedAt());
@@ -304,6 +397,36 @@ public class EndUserService {
             throw new IllegalStateException("The anchor's transaction returned no row");
         }
         return AccountService.toDomain(row);
+    }
+
+    /**
+     * Steps 3 and 4 of {@link #createOwn}: {@code account_id} onto the Keycloak user unless it says
+     * so already, then {@code END_USER}. Both are no-ops once done, which is what lets a repeat
+     * finish a call that stopped half-way.
+     */
+    private Account finishOwn(Account account, KeycloakUser user) {
+        UUID accountId = account.getAccountId();
+        Optional<UUID> written = user.accountId();
+        if (!written.equals(Optional.of(accountId))) {
+            written.ifPresent(other -> log.warn(
+                    "Keycloak user {} carried account_id {}, but its account is {}; writing that", user.id(), other,
+                    accountId));
+            if (!keycloak.writeAccountId(user.id(), accountId)) {
+                throw identityNotFound(accountId);
+            }
+        }
+        keycloak.grantRealmRole(user.id(), END_USER);
+        return account;
+    }
+
+    /**
+     * Staff by Keycloak's account of them now: in the {@code staff} group, or holding a staff role
+     * however it reached them. Either is enough; an account is never given to somebody who could
+     * administer other people's.
+     */
+    private boolean isStaff(UUID subject) {
+        return keycloak.isStaff(subject)
+                || keycloak.effectiveRealmRoles(subject).stream().anyMatch(STAFF_ROLES::contains);
     }
 
     /**

@@ -34,12 +34,14 @@ import org.springframework.transaction.annotation.Transactional;
  *   <li>{@code AccountService.create} — {@code POST /v1/accounts} without an identity;
  *   <li>{@code EndUserService.create} — with one, including the repeat that finishes a create
  *       interrupted between Keycloak and the database;
+ *   <li>{@code EndUserService.createOwn} — {@code PUT /v1/accounts/me}, the account at first
+ *       sign-in (#24);
  *   <li>outside Java, V3's backfill and the demo seed in {@code k8s/test-users}, which write the same
  *       row in SQL.
  * </ul>
  *
- * The account at first sign-in (#24) will be the next, and must call this in the transaction that
- * inserts its anchor; {@code AccountApiIT} and {@code EndUserApiIT} show what to assert.
+ * A path added later calls this in the transaction that inserts its anchor; {@code AccountApiIT}
+ * and {@code EndUserApiIT} show what to assert.
  *
  * <p><b>The sweep is the backstop, not the way.</b> It finds an account with no entry minutes
  * later, which covers the previous version's accounts during a rollout and any path that forgets;

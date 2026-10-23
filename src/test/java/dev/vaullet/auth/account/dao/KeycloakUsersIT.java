@@ -131,6 +131,40 @@ class KeycloakUsersIT {
     }
 
     @Test
+    @DisplayName("writes account_id onto a user who registered without one, and keeps everything else they had")
+    void writes_account_id_and_keeps_the_rest() {
+        String username = unique("registered");
+        // What Keycloak's registration page leaves: verified, named, no account_id. A pending
+        // required action stands for whatever else the user may carry that this class never sets.
+        UUID id = keycloak.create(new NewKeycloakUser(username, username + "@test.vaullet.dev", "Jane", "Doe", true,
+                null, null, false, List.of("UPDATE_PROFILE"))).orElseThrow();
+        UUID accountId = UUID.randomUUID();
+
+        assertThat(keycloak.writeAccountId(id, accountId)).isTrue();
+
+        KeycloakUser user = keycloak.findById(id).orElseThrow();
+        assertThat(user.accountId()).contains(accountId);
+        assertThat(user.username()).isEqualTo(username);
+        assertThat(user.email()).isEqualTo(username + "@test.vaullet.dev");
+        assertThat(user.firstName()).isEqualTo("Jane");
+        assertThat(user.lastName()).isEqualTo("Doe");
+        assertThat(user.emailVerified()).isTrue();
+        assertThat(user.enabled()).isTrue();
+        assertThat(user.requiredActions()).containsExactly("UPDATE_PROFILE");
+
+        // Writing it again, or replacing it, is one more PUT of the same shape.
+        UUID replacement = UUID.randomUUID();
+        assertThat(keycloak.writeAccountId(id, replacement)).isTrue();
+        assertThat(keycloak.findById(id).orElseThrow().accountId()).contains(replacement);
+    }
+
+    @Test
+    @DisplayName("writing account_id onto a user Keycloak does not have answers false")
+    void writes_account_id_to_nobody() {
+        assertThat(keycloak.writeAccountId(UUID.randomUUID(), UUID.randomUUID())).isFalse();
+    }
+
+    @Test
     @DisplayName("a partial update changes only what it names, and keeps account_id")
     void partial_update_keeps_the_rest() {
         String username = unique("update");

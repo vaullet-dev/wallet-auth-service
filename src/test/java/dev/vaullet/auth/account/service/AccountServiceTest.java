@@ -63,6 +63,30 @@ class AccountServiceTest {
     }
 
     @Nested
+    @DisplayName("findOwn")
+    class FindOwn {
+
+        @Test
+        @DisplayName("finds the caller's account by their Keycloak user id")
+        void found() {
+            AccountRow mine = row(SUB, null, "ACTIVE");
+            when(accounts.findByKeycloakSub(SUB)).thenReturn(Optional.of(mine));
+
+            assertThat(service.findOwn(SUB).getAccountId()).isEqualTo(mine.getAccountId());
+        }
+
+        @Test
+        @DisplayName("404s for somebody without one, saying how to get one")
+        void not_found() {
+            when(accounts.findByKeycloakSub(SUB)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> service.findOwn(SUB))
+                    .isInstanceOf(ResourceNotFoundException.class)
+                    .hasMessageContaining("PUT /v1/accounts/me");
+        }
+    }
+
+    @Nested
     @DisplayName("create")
     class Create {
 

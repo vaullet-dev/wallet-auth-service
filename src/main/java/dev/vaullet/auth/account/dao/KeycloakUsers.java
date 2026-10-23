@@ -8,6 +8,7 @@ import dev.vaullet.common.error.exception.ResourceConflictException;
 import dev.vaullet.common.error.exception.UpstreamUnavailableException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.Serial;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
@@ -17,6 +18,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -67,7 +69,8 @@ import org.springframework.web.client.RestClientException;
  *   <li>An attribute the realm's user profile does not declare is dropped without an error. That is
  *       why {@link #requireAccountIdEditableByAdminsOnly()} exists.
  *   <li>{@code PUT /users/{id}} with an {@code attributes} map replaces every attribute, and deletes
- *       the ones left out. Updates here never send the map, which tells Keycloak to keep what it has.
+ *       the ones left out. Updates here never send the map, which tells Keycloak to keep what it has
+ *       — except {@link #writeAccountId}, which has to, and so sends back the whole user it read.
  *   <li>With no SMTP server configured, every email action fails with a 500 — "Invalid sender
  *       address 'null'" — that reads exactly like an outage. {@link #emailConfigured()} is how a
  *       caller tells the two apart before it writes anything.
@@ -504,6 +507,53 @@ public class KeycloakUsers {
     }
 
     /**
+     * Write {@code account_id} onto a user who exists already: the account at first sign-in, for a
+     * user who registered on Keycloak's own pages and so was not born carrying one.
+     *
+     * <p>Keycloak has no partial update. {@code PUT /users/{id}} with an {@code attributes} map
+     * replaces every attribute and deletes the ones it leaves out, so this reads the user and sends
+     * the whole of it back with the one attribute set: the names, the email address, whether it is
+     * verified, and every other attribute travel unchanged. It is read as a map rather than as
+     * {@link KeycloakUser}, so a field this class does not model goes back exactly as it came.
+     *
+     * <p>A change the user makes in Keycloak between the read and the write would be undone. The
+     * window is one round trip, once in the life of an account.
+     *
+     * @return true if written, false if Keycloak has no such user
+     * @throws IdentityRejectedException if Keycloak refuses the user it just returned, which its
+     *     user profile does when the stored values no longer pass the profile's validators
+     */
+    public boolean writeAccountId(UUID userId, UUID accountId) {
+        Reply<StoredUser> read = send(
+                admin.get().uri("/admin/realms/{realm}/users/{id}", realm, userId), StoredUser.class);
+        if (read.status() == 404) {
+            return false;
+        }
+        StoredUser user = read.body();
+        if (read.status() != 200 || user == null) {
+            throw failure("GET /users/{id}", read);
+        }
+        Map<String, Object> attributes = new LinkedHashMap<>();
+        if (user.get("attributes") instanceof Map<?, ?> existing) {
+            existing.forEach((name, values) -> attributes.put(String.valueOf(name), values));
+        }
+        attributes.put(ACCOUNT_ID, List.of(accountId.toString()));
+        user.put("attributes", attributes);
+
+        Reply<Void> written = send(admin.put()
+                        .uri("/admin/realms/{realm}/users/{id}", realm, userId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(user),
+                Void.class);
+        return switch (written.status()) {
+            case 204 -> true;
+            case 404 -> false;
+            case 400 -> throw new IdentityRejectedException(written.error());
+            default -> throw failure("PUT /users/{id}", written);
+        };
+    }
+
+    /**
      * End every session the user has, so no refresh token of theirs works any more. Access tokens
      * already issued live out their lifetime; Keycloak cannot recall a signed token.
      *
@@ -749,6 +799,16 @@ public class KeycloakUsers {
     }
 
     record Reply<T>(int status, @Nullable T body, @Nullable URI location, String error) {}
+
+    /**
+     * A user exactly as Keycloak returned it, every field kept: what {@link #writeAccountId} reads
+     * and sends back. Never logged, and never leaves this class.
+     */
+    static final class StoredUser extends LinkedHashMap<String, Object> {
+
+        @Serial
+        private static final long serialVersionUID = 1L;
+    }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     record RoleRef(String id, String name) {}

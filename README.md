@@ -32,8 +32,8 @@ This service owns **Vaullet's own record of a user** and brokers everything abou
 
 ```
 ./mvnw spring-boot:run     # PostgreSQL, Keycloak and Mailpit via Compose, Flyway migrates, serves on :8080
-./mvnw test                # 168 unit + architecture tests, no Docker
-./mvnw verify              # adds 152 integration tests on real PostgreSQL and Keycloak
+./mvnw test                # 184 unit + architecture tests, no Docker
+./mvnw verify              # adds 167 integration tests on real PostgreSQL and Keycloak
 ```
 
 Then open <http://localhost:8080/swagger-ui.html>, or the collection in [`bruno/`](bruno) — see
@@ -77,6 +77,7 @@ a page, with the full component map, a worked account creation, and every field'
 - [The account status, and the freeze path](#the-account-status-and-the-freeze-path)
 - [Security](#security)
 - [End users (local mode)](#end-users-local-mode)
+- [The account at first sign-in](#the-account-at-first-sign-in)
 - [Staff (local mode)](#staff-local-mode)
 - [Package structure](#package-structure)
 - [Build order](#build-order)
@@ -279,6 +280,11 @@ GET    /v1/accounts?search=  |  ?email=&username=
                                            → 200  {data, next_cursor}, from Keycloak
 DELETE /v1/accounts/{id}                   → 204  CLOSED here, erased there
 
+── an end user's own account, local identity mode only (#24) ───────────────
+PUT    /v1/accounts/me     (no body)       → 201 created at first sign-in | 200 already there
+                                           | 403 STAFF_ACCOUNT_FORBIDDEN | 409 EMAIL_NOT_VERIFIED
+GET    /v1/accounts/me                     → 200 | 404 (none yet)          both modes
+
 ── staff, local identity mode only (#29) ───────────────────────────────────
 POST   /v1/staff           {username, email, first_name, last_name, roles, temporary_password}
                                            → 201 {staff_id, username, …, roles, enabled}
@@ -346,11 +352,12 @@ have been technically correct and practically useless: an integrator that gets a
 | `ACCOUNT_CLOSED` | 409 | The account is `CLOSED`, and closure is terminal. A 409 rather than a 404 — the account exists and the caller is entitled to know it exists. |
 | `USERNAME_TAKEN` | 409 | Keycloak has a user with this username that is not this request's own earlier attempt: another end user, a staff member, or someone who registered on Keycloak's pages. |
 | `EMAIL_TAKEN` | 409 | Keycloak has a user with this email address. |
-| `EMAIL_NOT_VERIFIED` | 409 | A password reset for a user who can already sign in and whose email address is unverified. The link would reach whoever owns an address nobody has proved — possibly one set a minute ago with `PATCH …/identity`. |
+| `EMAIL_NOT_VERIFIED` | 409 | A password reset for a user who can already sign in and whose email address is unverified. The link would reach whoever owns an address nobody has proved — possibly one set a minute ago with `PATCH …/identity`. Also `PUT /v1/accounts/me` from somebody who has not proved theirs: an account is opened for a verified address only. |
 | `IDENTITY_REJECTED` | 422 | Keycloak refused a value — the realm's password policy, or a user-profile validator. `detail` carries Keycloak's reason. |
 | `USER_MANAGEMENT_UNAVAILABLE` | 422 | An identity sent to a deployment with `auth.provider: federated`. |
 | `EMAIL_DELIVERY_UNAVAILABLE` | 422 | The realm has no SMTP server, so the invitation or reset email cannot go out. Checked before anything is written. |
 | `SELF_CHANGE_FORBIDDEN` | 403 | A staff member changing their own roles, disabling themselves or deleting themselves. |
+| `STAFF_ACCOUNT_FORBIDDEN` | 403 | `PUT /v1/accounts/me` from a member of staff — the `staff` group, or a staff role — asked of Keycloak at the time. Staff hold no money, so they have no account. |
 
 Neither `IDENTITY_ALREADY_LINKED`'s message nor `EXTERNAL_REF_TAKEN`'s names the *other* account. A
 caller holding one identifier should not learn another from an error body; that is a cross-system
@@ -378,13 +385,20 @@ for the requests under them: a folder run top to bottom creates, reads, changes 
 Every request asserts its status, so `bru run --env local` in `bruno/` (the CLI, `@usebruno/cli`)
 checks a local run end to end. The CLI cannot do the browser sign-in, so it is for `local` only.
 
+*My account* is the other side: `PUT` and `GET /v1/accounts/me` act on whoever is signed in, so they
+need an end user's sign-in in `prod` — somebody who registered on Keycloak's page, or
+`test-end-user` — after *Clear Cache* in the collection's Auth tab. Signed in as staff they answer
+`403 STAFF_ACCOUNT_FORBIDDEN`, and under `local` `403`, since the anonymous principal is nobody, so
+`bru run --env local` skips that folder.
+
 **Swagger UI** is at <https://vaullet.dev/api/auth/swagger-ui.html>. *Authorize* offers two schemes:
 `bearer-jwt` takes a pasted token, and with `keycloak` Swagger UI signs in itself through Keycloak,
 with the public client `swagger-ui`: authorization code with PKCE (from backend-common 1.0.0 and
 gitops `realm/26-vaullet-swagger-ui-client.yaml`). Sign in as staff with `SUPER_ADMIN`, e.g.
-`test-super-admin`, whose password is in OpenBao at `kv/keycloak/test-users`. Locally, at
-<http://localhost:8080/swagger-ui.html>, there is no sign-in: the `local` profile needs no token,
-and with no issuer there is no `keycloak` scheme.
+`test-super-admin`, whose password is in OpenBao at `kv/keycloak/test-users` — or choose *Register*
+on the sign-in page, follow the link in the email, choose a password, and `PUT /v1/accounts/me`
+as yourself. Locally, at <http://localhost:8080/swagger-ui.html>, there is no sign-in: the `local`
+profile needs no token, and with no issuer there is no `keycloak` scheme.
 
 ---
 
@@ -881,6 +895,7 @@ table, which has the `/v1/accounts/**` rows and still needs `/v1/staff/**` (arch
 | --- | --- |
 | `identity:read` | `GET /v1/accounts/**`, `GET /v1/staff/**` |
 | `identity:admin` | `POST`, `PATCH`, `PUT`, `DELETE` on both |
+| `identity:self` | `GET` and `PUT /v1/accounts/me`: the caller's own account, and nobody else's |
 
 Roles are realm roles from `realm_access.roles`, mapped to `ROLE_*` by `backend-common`'s
 `JwtAuthorityMapper`. **Keycloak assigns them; this service enforces what they mean.**
@@ -891,12 +906,19 @@ Roles are realm roles from `realm_access.roles`, mapped to `ROLE_*` by `backend-
 | `PATCH /v1/accounts/{id}` — the freeze | `FRAUD_REVIEWER` |
 | `GET /v1/accounts/**`, search included | `SUPPORT_AGENT` and up: every ADR-006 role except `END_USER` |
 | Everything under `/v1/staff`, reads included | `SUPER_ADMIN` |
+| `GET` and `PUT /v1/accounts/me` | **None**, and staff are refused: see below |
 
 **Every rule needs the role, reads included.** A scope says what the client may ask for, not who
 the user is: Keycloak puts a client scope in the token of everyone who signs in through a client it
 is attached to, `END_USER`s included. So `identity:read` on its own admits anyone the client admits,
 and it is the role that says who is asking. Each rule is written once, in `AccountAccess`, and both
 `AccountService` and `EndUserService` use them; staff management's are in `StaffAccess`.
+
+**`/v1/accounts/me` is the exception, and the reason is who calls it.** Its caller has usually just
+registered, and holds no role yet: `END_USER` is what `PUT` grants. So the rule is `identity:self`
+plus "the account is the caller's own" — the service method takes a Keycloak user id and the rule
+checks it is the token's `sub` — and what keeps staff out is not the token but Keycloak, asked at
+the time of the call (see [the account at first sign-in](#the-account-at-first-sign-in)).
 
 **The freeze deliberately sits on a different endpoint from user administration.** Two endpoints,
 two roles, two audit streams — ADR-006's separation of duties comes out of the resource layout
@@ -971,6 +993,51 @@ batch at a time, each account with its `identity`. Staff and users with no accou
 page can be short without being the last, and closed accounts are not found: their identity went
 with them.
 
+### The account at first sign-in
+
+Somebody can also become an end user without anyone creating them: they register on Keycloak's own
+sign-in page (gitops#21) — later, sign in with Google (gitops#19) — verify their email address, and
+only then choose a password: with email verification on, Keycloak 26 asks for none on the form.
+That makes them a realm user and nothing more: no account, no `account_id`, no role. Their account
+comes when the app first calls
+
+```
+PUT /v1/accounts/me        no body; the token says who
+```
+
+with the token they signed in with (#24). It is ADR-014's just-in-time path for local mode, and the
+order is `POST`'s turned round, because here the Keycloak user exists first:
+
+1. **Keycloak is asked who the caller is**, now — not the token, which is minutes old. Before
+   anything is written it refuses staff, `403 STAFF_ACCOUNT_FORBIDDEN` (a member of the `staff`
+   group, or anyone holding a staff role: staff hold no money); a client's service account and a
+   disabled user, `403 ACCESS_DENIED`; and, for a new account, an unverified address,
+   `409 EMAIL_NOT_VERIFIED`. The realm already holds an unverified user at sign-in (gitops#21), so
+   the last is a second lock for a realm configured without that.
+2. **The anchor**, with the caller's id as `keycloak_sub` and no `external_ref`, together with its
+   `identity.account-created` entry, in one transaction. This is the commit point: the account
+   exists from here, and the outbox opens its `REAL` and `BONUS` wallets.
+3. **`account_id` is written onto the Keycloak user.** Keycloak has no partial update, so the user
+   is read and sent back whole with the one attribute added — names, address, verification and
+   every other attribute go back as they came.
+4. **`END_USER` is granted.**
+
+`201` with the account the first time, `200` with the same account after that, so the app can call
+it at every sign-in. **The repeat is the recovery:** a call that died after the commit leaves an
+account whose user carries no `account_id` yet, and the next call finds the account by
+`keycloak_sub` and finishes steps 3 and 4, each a no-op once done. Concurrent calls, a double click,
+both reach the insert, and the unique key on `keycloak_sub` turns the second into a `200` with the
+first one's account. An end user created by staff with `POST` gets their existing account back
+unchanged.
+
+**The token used for the call does not change.** The next one — refreshed, or from the next sign-in
+— carries `account_id` and `END_USER`, because Keycloak builds each token from the user as it is
+then. `GET /v1/accounts/me` reads the account back, and answers `404` before there is one; it needs
+`identity:self` and no role, so a user who has just registered can ask.
+
+Under the `local` profile neither works: the anonymous principal has every scope and is nobody, so
+both answer `403`. They need a real token, from Swagger UI or Bruno against Keycloak.
+
 **What the realm must provide** (gitops, `apps/keycloak-config`):
 
 - a confidential client `wallet-auth-service` with service accounts on and every flow off, whose
@@ -982,7 +1049,10 @@ with them.
   `k8s/externalsecret-keycloak-client.yaml` and by keycloak-config-cli in the `keycloak` namespace;
 - an SMTP server in the realm, for invitations and resets (gitops#20). Without one those answer
   `422 EMAIL_DELIVERY_UNAVAILABLE`;
-- the realm group `staff` (gitops#23) and ADR-006's six realm roles, for staff management.
+- the realm group `staff` (gitops#23) and ADR-006's six realm roles, for staff management;
+- for the account at first sign-in: registration and email verification on (gitops#21), and on
+  every client people sign in with the client scopes `identity:self` and `account-id`, the second
+  being the mapper that puts `account_id` in the token. `swagger-ui` and `bruno` have both.
 
 The Admin API is called on Keycloak's in-cluster Service, never through `vaullet.dev/auth`.
 
@@ -1043,9 +1113,11 @@ less access rather than more; it takes effect at the member's next token. `PATCH
 `"enabled": false` switches a leaver off and ends their sessions. `DELETE` removes them for good,
 along with the name anything they did was recorded under.
 
-**Not yet guarded:** `/v1/accounts` reaches users only through their account, and staff have none —
-so today an end-user operation cannot touch a staff member. The account at first sign-in (#24) must
-keep it that way by never giving a member of `staff` an account.
+**Staff never get an account.** `/v1/accounts` reaches users only through their account, and staff
+have none — so an end-user operation cannot touch a staff member. The one path that creates an
+account for whoever asks, `PUT /v1/accounts/me` (#24), keeps it that way: it asks Keycloak whether
+the caller is in the `staff` group or holds a staff role, and answers `403 STAFF_ACCOUNT_FORBIDDEN`
+before writing anything.
 
 ---
 
@@ -1058,7 +1130,7 @@ ADR-014's order, because each step is independently useful and the first one unb
 | 1 | **The anchor** — migration, DAO, service, `POST`/`GET /v1/accounts`, `by-ref`, `PATCH` status | What both modes stand on. 25 main sources, 45 tests | ✅ **done** 2026-09-17 |
 | 2 | Token validation, the `account_id` protocol mapper, JIT provisioning, and the `identity.account-created.v1` producer | Tokens carry `account_id`; the unlinked anchor gets linked; the ledger gains its `account_balances` row | ⬜ **next** |
 | 3 | Status enforcement and the Redis-cached gateway check | The freeze takes effect | ⬜ |
-| 4 | The Keycloak admin client and the identity sub-resources | Local mode's user management — the facade | 🟡 **end users** (#17) live: create with an identity, `GET`/`PATCH …/identity`, `DELETE`. **Admin user management** (#29) written and tested: invitations instead of passwords, search, password reset, staff. The account at first sign-in (#24) follows |
+| 4 | The Keycloak admin client and the identity sub-resources | Local mode's user management — the facade | 🟡 **end users** (#17) live: create with an identity, `GET`/`PATCH …/identity`, `DELETE`. **Admin user management** (#29) live: invitations instead of passwords, search, password reset, staff. **The account at first sign-in** (#24), `PUT`/`GET /v1/accounts/me`, written and tested |
 | 5 | `api_clients` and token exchange (RFC 8693) | Operator server-to-server integration | ⬜ |
 
 Nothing else in the platform depends on steps 4 or 5, which is why they are last despite being the
@@ -1258,7 +1330,7 @@ small edit somewhere else.
 
 | | Decision | Still to do |
 | --- | --- | --- |
-| **Registration** | **Both.** Keycloak's hosted pages for self-service *and* `POST /v1/accounts` for operator-driven and bulk provisioning. An operator may use either, or both at once. | ADR-014 leaves this open and should record it. `auth.userManagement.selfRegistration` becomes a two-value setting rather than a choice between paths. |
+| **Registration** | **Both.** Keycloak's hosted pages for self-service *and* `POST /v1/accounts` for operator-driven and bulk provisioning. An operator may use either, or both at once. | Built: the pages are on since gitops#21, and a registered user gets their account at first sign-in with `PUT /v1/accounts/me` (#24). An operator who invites only drops gitops' registration file. ADR-014 still leaves this open and should record it (architecture#1). |
 | **Schema name** | **`identity_schema`**, matching ADR-003 and every diagram. | ADR-006 *Database placement* says "a separate `identity` schema" — a one-word edit, and it has to happen **before the first migration runs**, because after that it is a rename. |
 | **`idempotency_key` column** | **No.** The natural keys carry it — see [Idempotency without an idempotency key](#idempotency-without-an-idempotency-key). | ADR-011 makes `Idempotency-Key` a platform rule; this endpoint's exemption needs one paragraph in ADR-014 saying why, or the next reviewer will read it as an oversight. |
 | **The ledger's account row** | **Created whenever an account is created**, by event plus idempotent upsert — see [above](#and-the-ledgers-account-row). Since #39: the event is an [outbox](#the-account-created-outbox) row, and until there is Kafka the relay opens the account's `REAL` and `BONUS` wallets itself, with the ledger's `POST /v1/wallets`. | ADR-014 §7 and ADR-007 §9 to record the interim (architecture#3); then Kafka, the topic and the ledger's consumer. |

@@ -1,12 +1,14 @@
 package dev.vaullet.auth.account.api.v1;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.is;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -14,12 +16,22 @@ import com.jayway.jsonpath.JsonPath;
 
 import dev.vaullet.auth.account.dao.KeycloakUsers;
 import dev.vaullet.auth.account.dao.KeycloakUsers.NewKeycloakUser;
+import dev.vaullet.auth.account.service.EndUserService;
 import dev.vaullet.auth.support.FailingOutbox;
 import dev.vaullet.auth.support.KeycloakTestContainer;
 import dev.vaullet.auth.support.SmtpSink;
 import dev.vaullet.common.test.IntegrationTest;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -27,7 +39,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.JwtRequestPostProcessor;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -297,6 +313,258 @@ class EndUserApiIT {
                             .content(body(Person.fresh())))
                     .andExpect(status().isForbidden())
                     .andExpect(jsonPath("$.code", is("ACCESS_DENIED")));
+        }
+    }
+
+    /**
+     * The account at first sign-in (#24). The caller registered on Keycloak's own pages, so they are
+     * a realm user before they are anything here: no {@code account_id}, no role, not staff.
+     */
+    @Nested
+    @DisplayName("GET and PUT /v1/accounts/me")
+    class Me {
+
+        /** What registering on Keycloak's page leaves: a user with names and an email, and nothing of ours. */
+        private UUID registered(Person person, boolean emailVerified) {
+            return keycloak.create(new NewKeycloakUser(person.username(), person.email(), "Jane", "Doe", emailVerified,
+                    null, null, false, List.of())).orElseThrow();
+        }
+
+        /** Their token: their own sub, and identity:self, which every client people sign in with carries. */
+        private JwtRequestPostProcessor signedIn(UUID subject) {
+            return jwt().jwt(token -> token.subject(subject.toString()))
+                    .authorities(new SimpleGrantedAuthority("SCOPE_identity:self"));
+        }
+
+        private String createOwn(UUID subject, int status) throws Exception {
+            String body = mvc.perform(put("/v1/accounts/me").with(signedIn(subject)))
+                    .andExpect(status().is(status))
+                    .andReturn().getResponse().getContentAsString();
+            return JsonPath.read(body, "$.account_id");
+        }
+
+        private int anchors(UUID subject) {
+            return jdbc.queryForObject("SELECT count(*) FROM identity_schema.accounts WHERE keycloak_sub = ?",
+                    Integer.class, subject);
+        }
+
+        @Test
+        @DisplayName("creates the account, queues its event, writes account_id onto the user and grants END_USER")
+        void creates_own_account() throws Exception {
+            Person person = Person.fresh();
+            UUID subject = registered(person, true);
+
+            mvc.perform(put("/v1/accounts/me").with(signedIn(subject)))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.linked", is(true)))
+                    .andExpect(jsonPath("$.status", is("ACTIVE")))
+                    .andExpect(jsonPath("$.external_ref").doesNotExist());
+
+            UUID accountId = jdbc.queryForObject(
+                    "SELECT account_id FROM identity_schema.accounts WHERE keycloak_sub = ?", UUID.class, subject);
+            assertThat(jdbc.queryForObject("""
+                    SELECT count(*) FROM identity_schema.outbox
+                     WHERE account_id = ? AND event_type = 'identity.account-created'""", Integer.class, accountId))
+                    .isEqualTo(1);
+
+            // The attribute the token mapper reads, END_USER, and nothing else of the user changed:
+            // the write-back sends the whole user back, because Keycloak has no partial update.
+            var user = keycloak.findById(subject).orElseThrow();
+            assertThat(user.accountId()).contains(accountId);
+            assertThat(keycloak.realmRoles(subject)).contains("END_USER");
+            assertThat(user.username()).isEqualTo(person.username());
+            assertThat(user.email()).isEqualTo(person.email());
+            assertThat(user.firstName()).isEqualTo("Jane");
+            assertThat(user.lastName()).isEqualTo("Doe");
+            assertThat(user.emailVerified()).isTrue();
+            assertThat(user.enabled()).isTrue();
+
+            mvc.perform(get("/v1/accounts/me").with(signedIn(subject)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.account_id", is(accountId.toString())));
+        }
+
+        @Test
+        @DisplayName("repeated, it answers 200 with the same account and queues nothing more")
+        void repeat_is_safe() throws Exception {
+            UUID subject = registered(Person.fresh(), true);
+
+            String first = createOwn(subject, 201);
+            String second = createOwn(subject, 200);
+
+            assertThat(second).isEqualTo(first);
+            assertThat(anchors(subject)).isEqualTo(1);
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM identity_schema.outbox WHERE account_id = ?",
+                    Integer.class, UUID.fromString(first))).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("four calls at once, a double click and then some, still make one account")
+        void concurrent_calls() throws Exception {
+            UUID subject = registered(Person.fresh(), true);
+            int calls = 4;
+            var start = new CountDownLatch(1);
+            try (var pool = Executors.newFixedThreadPool(calls)) {
+                List<Future<String>> answers = new ArrayList<>();
+                for (int i = 0; i < calls; i++) {
+                    answers.add(pool.submit(() -> {
+                        start.await();
+                        var response = mvc.perform(put("/v1/accounts/me").with(signedIn(subject)))
+                                .andReturn().getResponse();
+                        assertThat(response.getStatus()).isIn(200, 201);
+                        return JsonPath.<String>read(response.getContentAsString(), "$.account_id");
+                    }));
+                }
+                start.countDown();
+                Set<String> ids = new HashSet<>();
+                for (var answer : answers) {
+                    ids.add(answer.get(30, TimeUnit.SECONDS));
+                }
+                assertThat(ids).hasSize(1);
+            }
+            assertThat(anchors(subject)).isEqualTo(1);
+            assertThat(jdbc.queryForObject("""
+                    SELECT count(*) FROM identity_schema.outbox o
+                      JOIN identity_schema.accounts a ON a.account_id = o.account_id
+                     WHERE a.keycloak_sub = ?""", Integer.class, subject)).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("GET 404s until the account exists, without a role to ask with")
+        void get_before_put() throws Exception {
+            UUID subject = registered(Person.fresh(), true);
+
+            mvc.perform(get("/v1/accounts/me").with(signedIn(subject)))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.code", is("RESOURCE_NOT_FOUND")));
+        }
+
+        @Test
+        @DisplayName("an end user created by staff gets their existing account back, unchanged")
+        void staff_created_end_user() throws Exception {
+            Person person = Person.fresh();
+            String id = create(person, true);
+            UUID subject = keycloak.findByUsername(person.username()).orElseThrow().id();
+
+            assertThat(createOwn(subject, 200)).isEqualTo(id);
+            mvc.perform(get("/v1/accounts/me").with(signedIn(subject)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.external_ref", is(person.ref())));
+        }
+
+        @Test
+        @DisplayName("refuses a member of staff, and creates nothing")
+        void refuses_staff() throws Exception {
+            String tag = UUID.randomUUID().toString().substring(0, 8);
+            UUID subject = keycloak.create(NewKeycloakUser.staff("ana-" + tag, "ana-" + tag + "@test.vaullet.dev",
+                    "Ana", "Kovač", "Temp-pass-123", List.of())).orElseThrow();
+
+            mvc.perform(put("/v1/accounts/me").with(signedIn(subject)))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code", is("STAFF_ACCOUNT_FORBIDDEN")));
+
+            assertThat(anchors(subject)).isZero();
+            assertThat(keycloak.realmRoles(subject)).doesNotContain("END_USER");
+            assertThat(keycloak.findById(subject).orElseThrow().accountId()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("refuses somebody holding a staff role outside the staff group")
+        void refuses_staff_role() throws Exception {
+            UUID subject = registered(Person.fresh(), true);
+            keycloak.grantRealmRole(subject, "SUPPORT_AGENT");
+
+            mvc.perform(put("/v1/accounts/me").with(signedIn(subject)))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code", is("STAFF_ACCOUNT_FORBIDDEN")));
+            assertThat(anchors(subject)).isZero();
+        }
+
+        @Test
+        @DisplayName("refuses an unverified address, and creates nothing")
+        void refuses_unverified() throws Exception {
+            UUID subject = registered(Person.fresh(), false);
+
+            mvc.perform(put("/v1/accounts/me").with(signedIn(subject)))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.code", is("EMAIL_NOT_VERIFIED")));
+            assertThat(anchors(subject)).isZero();
+        }
+
+        @Test
+        @DisplayName("refuses a client's service account: it has no email address to have verified")
+        void refuses_a_service_account() throws Exception {
+            // The user behind a client-credentials token. Keycloak's Admin API does not say a user is
+            // a service account, so it is the missing address that refuses it.
+            RestClient client = RestClient.create(KeycloakTestContainer.url());
+            String token = JsonPath.read(client.post()
+                    .uri("/realms/{realm}/protocol/openid-connect/token", KeycloakTestContainer.REALM)
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .body("grant_type=client_credentials&client_id=" + KeycloakTestContainer.CLIENT_ID
+                            + "&client_secret=" + KeycloakTestContainer.CLIENT_SECRET)
+                    .retrieve()
+                    .body(String.class), "$.access_token");
+            String payload = new String(Base64.getUrlDecoder().decode(token.split("\\.")[1]),
+                    StandardCharsets.UTF_8);
+            UUID serviceAccount = UUID.fromString(JsonPath.read(payload, "$.sub"));
+
+            mvc.perform(put("/v1/accounts/me").with(signedIn(serviceAccount)))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.code", is("EMAIL_NOT_VERIFIED")));
+            assertThat(anchors(serviceAccount)).isZero();
+        }
+
+        @Test
+        @DisplayName("needs identity:self; a role does not stand in for it")
+        void needs_the_scope() throws Exception {
+            UUID subject = registered(Person.fresh(), true);
+
+            mvc.perform(put("/v1/accounts/me").with(jwt().jwt(token -> token.subject(subject.toString()))
+                            .authorities(new SimpleGrantedAuthority("SCOPE_identity:admin"),
+                                    new SimpleGrantedAuthority("ROLE_END_USER"))))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code", is("ACCESS_DENIED")));
+            mvc.perform(get("/v1/accounts/me").with(jwt().jwt(token -> token.subject(subject.toString()))
+                            .authorities(new SimpleGrantedAuthority("SCOPE_identity:read"),
+                                    new SimpleGrantedAuthority("ROLE_SUPER_ADMIN"))))
+                    .andExpect(status().isForbidden());
+            assertThat(anchors(subject)).isZero();
+        }
+
+        @Test
+        @DisplayName("refuses a token that names nobody in Keycloak's terms")
+        void needs_a_keycloak_sub() throws Exception {
+            mvc.perform(put("/v1/accounts/me").with(jwt().jwt(token -> token.subject("not-a-keycloak-id"))
+                            .authorities(new SimpleGrantedAuthority("SCOPE_identity:self"))))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code", is("ACCESS_DENIED")));
+        }
+
+        @Test
+        @DisplayName("refuses without a token")
+        void needs_a_token() throws Exception {
+            mvc.perform(put("/v1/accounts/me")).andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        @DisplayName("the method itself takes only the caller's own id, whoever calls it")
+        void method_rule_is_the_callers_own(@Autowired EndUserService endUsers) {
+            UUID caller = registered(Person.fresh(), true);
+            UUID somebodyElse = registered(Person.fresh(), true);
+            var token = new JwtAuthenticationToken(
+                    Jwt.withTokenValue("test").header("alg", "none")
+                            .subject(caller.toString()).build(),
+                    List.of(new SimpleGrantedAuthority("SCOPE_identity:self")));
+            var context = SecurityContextHolder.createEmptyContext();
+            context.setAuthentication(token);
+            SecurityContextHolder.setContext(context);
+            try {
+                assertThatThrownBy(() -> endUsers.createOwn(somebodyElse))
+                        .isInstanceOf(AccessDeniedException.class);
+            } finally {
+                SecurityContextHolder.clearContext();
+            }
+            assertThat(anchors(somebodyElse)).isZero();
         }
     }
 

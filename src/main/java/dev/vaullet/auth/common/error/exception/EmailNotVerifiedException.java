@@ -6,8 +6,9 @@ import java.io.Serial;
 import java.util.UUID;
 
 /**
- * A reset link would go to an address the user has not proved, and they can already sign in — see
- * {@link AuthErrorType#EMAIL_NOT_VERIFIED}.
+ * Refused because an email address is unverified — see {@link AuthErrorType#EMAIL_NOT_VERIFIED}:
+ * a reset link that would go to an address the user has not proved while they can already sign in,
+ * or an account at first sign-in for somebody who has not proved theirs.
  */
 public class EmailNotVerifiedException extends ApplicationException {
 
@@ -15,8 +16,17 @@ public class EmailNotVerifiedException extends ApplicationException {
     private static final long serialVersionUID = 1L;
 
     public EmailNotVerifiedException(UUID accountId) {
-        super(AuthErrorType.EMAIL_NOT_VERIFIED,
-                "Account %s can already sign in and its email address is unverified, so no reset link was sent"
-                        .formatted(accountId));
+        this("Account %s can already sign in and its email address is unverified, so no reset link was sent"
+                .formatted(accountId));
+    }
+
+    private EmailNotVerifiedException(String detail) {
+        super(AuthErrorType.EMAIL_NOT_VERIFIED, detail);
+    }
+
+    /** {@code PUT /v1/accounts/me} by somebody whose email address is not verified yet. */
+    public static EmailNotVerifiedException beforeOwnAccount() {
+        return new EmailNotVerifiedException("Your email address is not verified yet, and an account is opened "
+                + "only for a verified one. Follow the link in the email Keycloak sent you, then sign in again");
     }
 }
