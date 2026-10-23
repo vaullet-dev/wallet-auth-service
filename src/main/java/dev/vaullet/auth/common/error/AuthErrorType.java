@@ -120,17 +120,22 @@ public enum AuthErrorType implements ErrorType {
             "email-delivery-unavailable", HttpStatus.valueOf(422), "Email delivery is not configured"),
 
     /**
-     * A password reset was asked for a user who can already sign in, and their email address is
-     * unverified.
+     * The request depends on an email address the user has not proved, and it is refused until they
+     * have. Two requests raise it.
      *
-     * <p>A reset link hands the account to whoever reads that inbox. An address the user has not
-     * proved is, by definition, one nobody has shown they own — it may be a typo, or the address an
-     * administrator set a minute ago with {@code PATCH …/identity}, which would make "change the
-     * address, then send a reset" a way into somebody else's wallet. So once there is a login to
-     * take over, the link goes only to a verified address.
+     * <p><b>A password reset for a user who can already sign in.</b> A reset link hands the account
+     * to whoever reads that inbox. An address the user has not proved is, by definition, one nobody
+     * has shown they own — it may be a typo, or the address an administrator set a minute ago with
+     * {@code PATCH …/identity}, which would make "change the address, then send a reset" a way into
+     * somebody else's wallet. So once there is a login to take over, the link goes only to a
+     * verified address. A user who cannot sign in yet is not refused — for them the link is their
+     * invitation, sent again.
      *
-     * <p>A 409: the same request succeeds once the address is verified. A user who cannot sign in
-     * yet is not refused — for them the link is their invitation, sent again.
+     * <p><b>The account at first sign-in</b>, {@code PUT /v1/accounts/me}. An account is opened for
+     * a proved address only. The realm already holds an unverified user at sign-in (gitops#21), so
+     * this is the second lock, for a realm configured without that.
+     *
+     * <p>A 409 in both cases: the same request succeeds once the address is verified.
      */
     EMAIL_NOT_VERIFIED("email-not-verified", HttpStatus.CONFLICT, "Email address not verified"),
 
@@ -145,7 +150,21 @@ public enum AuthErrorType implements ErrorType {
      * <p>A 403 with a code of its own rather than the platform's {@code ACCESS_DENIED}: the caller
      * holds the right role, and a dashboard should be able to say why this one target is refused.
      */
-    SELF_CHANGE_FORBIDDEN("self-change-forbidden", HttpStatus.FORBIDDEN, "Not allowed on your own account");
+    SELF_CHANGE_FORBIDDEN("self-change-forbidden", HttpStatus.FORBIDDEN, "Not allowed on your own account"),
+
+    /**
+     * A member of staff asked for an account of their own, with {@code PUT /v1/accounts/me}.
+     *
+     * <p>Staff hold no money, so they have no account (ADR-006): an account would put a wallet, and
+     * {@code END_USER}, in the hands of somebody whose job is to administer other people's. Staff
+     * means a member of the realm group {@code staff}, or anyone holding one of the staff roles,
+     * asked of Keycloak at the time of the request rather than read from the token.
+     *
+     * <p>A 403 with a code of its own rather than the platform's {@code ACCESS_DENIED}: the token
+     * carries the scope the endpoint asks for, and an app signing a staff member in should be able
+     * to say why there is no wallet for them.
+     */
+    STAFF_ACCOUNT_FORBIDDEN("staff-account-forbidden", HttpStatus.FORBIDDEN, "Staff have no account");
 
     private final URI type;
     private final HttpStatus status;

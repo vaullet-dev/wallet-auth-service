@@ -179,6 +179,24 @@ public class AccountService {
     }
 
     /**
+     * The caller's own account: the one linked to their Keycloak user.
+     *
+     * <p>Not found is an answer here, not an error in the data: somebody who registered on
+     * Keycloak's pages has no account until {@code PUT /v1/accounts/me} creates it, and staff never
+     * have one. Both modes, because the account is ours in both; in federated mode an account is
+     * linked to its user at first sign-in by step 2, which is not built yet.
+     *
+     * @param subject the caller's Keycloak user id; {@link AccountAccess#SELF} checks it is theirs
+     */
+    @Transactional(readOnly = true)
+    @PreAuthorize(AccountAccess.SELF)
+    public Account findOwn(UUID subject) {
+        return accounts.findByKeycloakSub(subject).map(AccountService::toDomain)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "You have no account yet. PUT /v1/accounts/me creates it"));
+    }
+
+    /**
      * Move the account to a new status — the fraud freeze, and closure.
      *
      * <p>The guard lives in the {@code UPDATE} rather than in a read before it, so a concurrent

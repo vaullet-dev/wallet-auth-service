@@ -18,9 +18,9 @@ final class AccountAccess {
      * attached to, {@code END_USER} included (#15).
      *
      * <p>An allow-list rather than "anyone but {@code END_USER}": a token with no role at all, or a
-     * role added to the realm later, is refused until someone decides otherwise. An end user reading
-     * their own account arrives with the {@code account_id} claim in step 2, and operator backends on
-     * client credentials in step 5; each becomes a clause here when it does.
+     * role added to the realm later, is refused until someone decides otherwise. An end user reads
+     * their own account through {@link #SELF} instead, and operator backends on client credentials
+     * arrive in step 5 and become a clause here when they do.
      */
     static final String READ = "hasAuthority('SCOPE_identity:read') and hasAnyRole("
             + "'SUPPORT_AGENT', 'FRAUD_REVIEWER', 'FINANCE', 'CONFIG_ADMIN', 'SUPER_ADMIN')";
@@ -36,6 +36,21 @@ final class AccountAccess {
      * of duties means the people who administer users are not the people who freeze them.
      */
     static final String FREEZE = "hasAuthority('SCOPE_identity:admin') and hasRole('FRAUD_REVIEWER')";
+
+    /**
+     * An end user's own account, and nobody else's: {@code GET} and {@code PUT /v1/accounts/me}.
+     *
+     * <p>{@code identity:self}, and no role. The user this exists for holds none yet: {@code PUT}
+     * is what grants {@code END_USER}, to somebody who registered on Keycloak's own pages a minute
+     * ago. What keeps it to end users is the method behind it, which asks Keycloak about the caller
+     * and refuses staff. What keeps it to the caller is this rule: the method takes the account's
+     * Keycloak user id as a parameter named {@code subject}, and the rule insists it is the caller's
+     * own ({@code authentication.name} is the token's {@code sub}). The controller passes exactly
+     * that, and checking it here as well means no later caller of the method can pass somebody
+     * else's by mistake.
+     */
+    static final String SELF =
+            "hasAuthority('SCOPE_identity:self') and #subject.toString() == authentication.name";
 
     private AccountAccess() {}
 }

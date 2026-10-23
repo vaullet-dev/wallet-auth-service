@@ -15,7 +15,9 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.net.URI;
+import java.security.Principal;
 import java.util.UUID;
+import org.jspecify.annotations.Nullable;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -109,6 +111,17 @@ class AccountController {
     @ApiResponse(responseCode = "404", description = "RESOURCE_NOT_FOUND")
     AccountResponse getById(@PathVariable UUID id) {
         return AccountResponse.from(accounts.find(id));
+    }
+
+    @GetMapping("/me")
+    @Operation(
+            summary = "Fetch your own account",
+            description = "The account of whoever the token names, and nobody else's. Needs the identity:self "
+                    + "scope and no role, so somebody who has just registered can ask whether they have an "
+                    + "account yet; PUT /v1/accounts/me creates it.")
+    @ApiResponse(responseCode = "404", description = "RESOURCE_NOT_FOUND — you have no account yet")
+    AccountResponse getOwn(@Nullable Principal caller) {
+        return AccountResponse.from(accounts.findOwn(Callers.subject(caller)));
     }
 
     @GetMapping("/by-ref/{externalRef}")
